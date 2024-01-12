@@ -24,8 +24,8 @@ loop:          cls
 ;--------------------------------------
 gen_columns:
              ; Generate column 0
-             ldi r0, 16             ; col[0] height in [16..223]
-             ldi r1, 223
+             ldi r0, 16             ; col[0] height in [16..160]
+             ldi r1, 160
              call gen_x_ranged
 .aaa:        ldi r8, data.terrain
 .gen_col0:   stm r0, r8
@@ -56,8 +56,10 @@ gen_columns:
 .zzz:        mov r1, r9
              addi r1, data.terrain
 .gen_colLT:  stm r0, r1             ; write col[x]
-
-             addi r9, 2
+             ;cmpi r9, 32
+             ;jnz .zzzB
+.zzzA:       ;nop
+.zzzB:       addi r9, 2
              jmp .gen_colLL
 
 .gen_colZ:   ret
@@ -86,11 +88,13 @@ drw_columns:   ldi r1, 254
 .drw_colLp0:   mov r0, r1
                addi r0, data.terrain
                ldm r4, r0
-.xyz:          andi r4, 0xff
-               mov r2, r4
-               shl r4, 8
-               ori r4, 0x01
-               stm r4, .drw_colsprB
+               ;cmpi r1, 32
+               ;jnz .xyz
+.zzzC:         ;nop
+.xyz:          mov r2, r4
+               shl r4, 8               ; move HH to high byte of word
+               ori r4, 0x01            ; low byte of word = 1 for width of 2px
+               stm r4, .drw_colsprB    ; store word in HHLL word of SPR instr.
 .drw_colsprA:  dw 0x0004               ; spr HHLL, bytes 0-1 [opcode]
 .drw_colsprB:  dw 0x0101               ; spr HHLL, bytes 2-3 [LL HH]
                ldi r3, 240
@@ -100,12 +104,26 @@ drw_columns:   ldi r1, 254
                jnn .drw_colLp0
 .drw_colZ:     ret
 
+;--------------------------------------
+; drw_cannons --
+;
+; Draw cannons, one at column 16 and the other at column 224.
+; Cannons are 2x4 rectangle sprites.
+;--------------------------------------
 drw_cannons:   spr 0x0401              ; cannons are 2x4 pixels
-               ldi r0, 16
-               ldi r1, 32
+               ldi r0, 32
+               mov r1, r0
                addi r1, data.terrain
                ldm r1, r1
-               ldi r2, 240
+.zzzD:         ldi r2, 240
+               sub r2, r1, r1
+               subi r1, 4
+               drw r0, r1, data.spr_cnn ; draw at (x, 240 - col[x] - 4)
+               ldi r0, 224
+               mov r1, r0
+               addi r1, data.terrain
+               ldm r1, r1
+.zzzE:         ldi r2, 240
                sub r2, r1, r1
                subi r1, 4
                drw r0, r1, data.spr_cnn ; draw at (x, 240 - col[x] - 4)
@@ -138,37 +156,37 @@ data.terrain:  dw 0, 0, 0, 0, 0, 0, 0, 0  ; 2B x 8 x 16 rows = 256 B
                dw 0, 0, 0, 0, 0, 0, 0, 0
                dw 0, 0, 0, 0, 0, 0, 0, 0
 
-data.spr:      dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 16
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 32 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 48 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 64 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 80 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 96 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 112
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 128
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 16
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 32 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 48 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 64 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 80 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 96 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 112
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 128
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 16
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 32 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 48 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 64 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 80 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 96 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 112
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 128
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 16
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 32 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 48 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 64 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 80 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 96 
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 112
-               dw 0xffff, 0xffff, 0xffff, 0xffff,  ; 128
+data.spr:      dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 16
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 32 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 48 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 64 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 80 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 96 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 112
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 128
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 16
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 32 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 48 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 64 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 80 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 96 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 112
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 128
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 16
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 32 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 48 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 64 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 80 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 96 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 112
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 128
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 16
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 32 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 48 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 64 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 80 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 96 
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 112
+               dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 128
 
-data.spr_cnn:  db 0xaa, 0xaa, 0xaa, 0xaa
+data.spr_cnn:  db 0xff, 0xff, 0xff, 0xff
