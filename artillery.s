@@ -139,44 +139,41 @@ handle_msl:    ldm r0, data.msl_stat
                jl .handle_msC
                pop r0
                jmp reset
-.handle_msC:   ldm r1, data.msl_dx
-               sar r1, 8
-               add r0, r1
-               stm r0, data.msl_x     ; x = x + dx
-               ldm r0, data.msl_y
-               ldm r1, data.msl_dy
-               mov r2, r1
-               sar r1, 8
-               add r0, r1
-               stm r0, data.msl_y     ; y = y + dy
-               cmpi r0, 240
-               jl .handle_msD
-               pop r0
-               jmp reset
-               ; Update dy to account for gravity
-.handle_msD:   cmpi r1, 6
-               jge .handle_msX
-               addi r2, 300         ; FP8.8 representation i.e. 1.13 or so
-               stm r2, data.msl_dy
+.handle_msC:   ldi r0, 0               ; 8 steps to more accurately find hit
+               ldm r1, data.msl_dx
+               sar r1, 7               ; dx/8 in FP12.4, so shift.r (3+4)
+               ldm r2, data.msl_dy
+               sar r2, 7               ; dy/8 in FP12.4, so shift.r (3+4)
+               ldm r3, data.msl_x
+               shl r3, 4               ; x in FP12.4
+               ldm r4, data.msl_y
+               shl r4, 4               ; y in FP12.4
+.handle_msCL:  cmpi r0, 8
+               jz .handle_msD
+               addi r0, 1
+               add r3, r1
+               add r4, r2
                ; Check for collision with terrain
-.handle_msX:   ldm r1, data.msl_x
-               andi r1, 0xfffe      ; 2px/col, 2B/col -> clear LSB
-               addi r1, data.terrain
-               ldm r2, r1
-               ldi r3, 240
-               sub r3, r2, r4
-               cmp r0, r4           ; data.msl_y > (240 - col[data.msl_x]) ?
-.mmmm:         jl .handle_msZ
-               subi r2, 6
-               stm r2, r1           ; blow top 4px off column
-               addi r1, 2
-               ldm r2, r1
-               subi r2, 3
-               stm r2, r1           ; blow top 2px off right neighbor column
-               subi r1, 4
-               ldm r2, r1
-               subi r2, 3
-               stm r2, r1           ; blow top 2px off left neighbor column
+.handle_msX:   mov r5, r4
+               sar r5, 4            ; y
+               ldm r6, data.msl_x
+               andi r6, 0xfffe      ; 2px/col, 2B/col -> clear LSB
+               addi r6, data.terrain
+               ldm r8, r6
+               ldi r7, 240
+               sub r7, r8
+               cmp r5, r7           ; data.msl_y > (240 - col[data.msl_x]) ?
+.mmmm:         jl .handle_msCL
+               subi r8, 6
+               stm r8, r6           ; blow top 4px off column
+               addi r6, 2
+               ldm r8, r6
+               subi r8, 3
+               stm r8, r6           ; blow top 2px off right neighbor column
+               subi r6, 4
+               ldm r8, r6
+               subi r8, 3
+               stm r8, r6           ; blow top 2px off left neighbor column
                bgc 0x8              ; background flashes yellow
                sng 0x04, 0xf3c6
                ldi r0, 500
@@ -184,19 +181,29 @@ handle_msl:    ldm r0, data.msl_stat
                vblnk
                ldi r0, 0
                stm r0, data.msl_stat ; reset missile status
+               ; Update dy to account for gravity
+.handle_msD:   sar r3, 4
+               stm r3, data.msl_x
+               sar r4, 4
+               stm r4, data.msl_y
+               ldm r1, data.msl_dy
+               cmpi r1, 1536        ; 6 in FP8.8
+               jge .handle_msZ
+               addi r1, 300         ; FP8.8 representation i.e. 1.13 or so
+               stm r1, data.msl_dy
 .handle_msZ:   ret
 
 ;--------------------------------------
 ; gen_columns --
 ;
-; Generate terrain, settling with 128 2px columns.
+; Generate terrain, settling with 160 2px columns.
 ; - First column randomly selected within a middle interval
 ; - Select each subsequent column as a function of the previous one.
 ;
 ;--------------------------------------
 gen_columns:
              ; Generate column 0
-             ldi r0, 16             ; col[0] height in [16..160]
+             ldi r0, 16             ; col[0] height in [16..64]
              ldi r1, 64
              call gen_x_ranged
 .aaa:        ldi r8, data.terrain
@@ -204,7 +211,7 @@ gen_columns:
 
              ; Generate next columns iteratively
 .gen_colLL0: ldi r9, 2              ; for (x = 2;
-.gen_colLL:  cmpi r9, 256           ;      x < 256;
+.gen_colLL:  cmpi r9, 320           ;      x < 320;
              jz .gen_colZ           ;      x+=2) {
 
 ; col[x] = gen_x_ranged(max(1, col[x - 1] - 2), min(col[x - 1] + 3, 239));
@@ -233,7 +240,7 @@ gen_columns:
 .zzzA:       ldi r2, 240
              sub r2, r0, r0
              stm r0, data.p1_y      ; store p1.y
-.zzzB:       cmpi r9, 224
+.zzzB:       cmpi r9, 288
              jnz .zzzC
              ldi r2, 240
              sub r2, r0, r0
@@ -263,7 +270,7 @@ gen_x_ranged:  mov r2, r0           ; E.g. RND[X,Y] into ...
 ;
 ; Draw terrain, one 2px wide column at a time.
 ;--------------------------------------
-drw_columns:   ldi r1, 254
+drw_columns:   ldi r1, 318
 .drw_colLp0:   mov r0, r1
                addi r0, data.terrain
                ldm r4, r0
@@ -283,7 +290,7 @@ drw_columns:   ldi r1, 254
 ;--------------------------------------
 ; drw_cannons --
 ;
-; Draw cannons, one at column 16 and the other at column 224.
+; Draw cannons, one at column 16 and the other at column 112.
 ; Cannons are 2x4 rectangle sprites.
 ;--------------------------------------
 drw_cannons:   spr 0x0401              ; cannons are 2x4 pixels
@@ -436,7 +443,7 @@ data.p0_ang:   dw 0
 data.p1_ang:   dw 0
 data.p1_x:     dw 32
 data.p1_y:     dw 0
-data.p2_x:     dw 224
+data.p2_x:     dw 288
 data.p2_y:     dw 0
 data.msl_stat: dw 0
 data.msl_x:    dw 0
@@ -450,7 +457,11 @@ data.str_power: db "Power %"
                 db 0
 data.str_bcd3: db 0,0,0,0
 
-data.terrain:  dw 0, 0, 0, 0, 0, 0, 0, 0  ; 2B x 8 x 16 rows = 256 B
+data.terrain:  dw 0, 0, 0, 0, 0, 0, 0, 0  ; 2B x 8 x 20 rows = 320 B
+               dw 0, 0, 0, 0, 0, 0, 0, 0
+               dw 0, 0, 0, 0, 0, 0, 0, 0
+               dw 0, 0, 0, 0, 0, 0, 0, 0
+               dw 0, 0, 0, 0, 0, 0, 0, 0
                dw 0, 0, 0, 0, 0, 0, 0, 0
                dw 0, 0, 0, 0, 0, 0, 0, 0
                dw 0, 0, 0, 0, 0, 0, 0, 0
