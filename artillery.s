@@ -15,15 +15,18 @@ CHAR_OFFS         equ 32
 ; Main game loop.
 ;---------------------------------------
 init:          call gen_columns
+               call gen_spr
 loop:          cls
                bgc 1
                call handle_inp
                call handle_msl
+               call handle_debris
                call drw_hud
                call drw_columns
                call drw_cannons
                call drw_target
                call drw_msl
+               call drw_debris
                vblnk
                jmp loop
 
@@ -34,6 +37,7 @@ loop:          cls
 ;--------------------------------------
 reset:         ldi r0, 0
                stm r0, data.msl_stat
+               stm r0, data.drw_debris
                jmp init
 
 ;--------------------------------------
@@ -91,12 +95,16 @@ handle_inp:    ldm r0, 0xfff0
 ;--------------------------------------
 ; handle_msl --
 ;
-; If missile status changed to fire, launch missile. Update its velocity and
+; If missile status changed to fire, launch missile.
+; If missile status is launched, update its velocity and
 ; position until its height dips at/below current column height.
 ;
 ; msl_stat: 0 = missile_ready, 1 == missile_fire, 2 == missile_launched
 ;--------------------------------------
 handle_msl:    ldm r0, data.msl_stat
+
+               ; Fire missile
+               ;-------------
                cmpi r0, 1              ; 1 == fire the missile
                jnz .handle_msA
                ldi r0, 2
@@ -105,12 +113,14 @@ handle_msl:    ldm r0, data.msl_stat
                sng 0x02, 0xc3a1
                ldi r0, 1000
                snp r0, 100             ; play firing noise
-               ; Load player cannon x, y
+               ;;; Load player cannon x, y
                ldm r0, data.p1_x
-               stm r0, data.msl_x
+               shl r0, 4
+               stm r0, data.msl_x      ; FP12.4
                ldm r0, data.p1_y
+               shl r0, 4               ; FP12.4
                stm r0, data.msl_y
-               ; Compute initial dx, dy from angle and power
+               ;;; Compute initial dx, dy from angle and power
                ldm r2, data.cur_ang
                shl r2, 2               ; angle -> word pair (2*2B) array offset
                addi r2, data.lut_sincos
@@ -119,7 +129,7 @@ handle_msl:    ldm r0, data.msl_stat
                sar r2, 1
                addi r3, 2
                ldm r3, r3
-               ; Scale dx, dy by power ratio. Divide first to avoid overflow
+               ;;; Scale dx, dy by power ratio. Divide first to avoid overflow
                ldm r4, data.cur_pow
                divi r2, 50
                mul r2, r4
@@ -128,35 +138,40 @@ handle_msl:    ldm r0, data.msl_stat
                stm r2, data.msl_dx     ; stored in FP8.8 format
                stm r3, data.msl_dy     ; stored in FP8.8 format
                ldi r0, 2
+
+               ; Update missile, launched
+               ;-------------------------
 .handle_msA:   cmpi r0, 2
                jnz .handle_msZ
 .mmm:          ldm r0, data.msl_x
+               sar r0, 4
                cmpi r0, 0
                jge .handle_msB
-               pop r0
-               jmp reset
+               ldi r0, 0
+               stm r0, data.msl_stat
+               jmp .handle_msZ
 .handle_msB:   cmpi r0, 320
                jl .handle_msC
-               pop r0
-               jmp reset
-.handle_msC:   ldi r0, 0               ; 8 steps to more accurately find hit
+               ldi r0, 0
+               stm r0, data.msl_stat
+               jmp .handle_msZ
+.handle_msC:   ldi r0, 0               ; 16 steps to more accurately find hit
                ldm r1, data.msl_dx
-               sar r1, 7               ; dx/8 in FP12.4, so shift.r (3+4)
+               sar r1, 8               ; dx/8 in FP12.4, so shift.r (4+4)
                ldm r2, data.msl_dy
-               sar r2, 7               ; dy/8 in FP12.4, so shift.r (3+4)
+               sar r2, 8               ; dy/8 in FP12.4, so shift.r (4+4)
                ldm r3, data.msl_x
-               shl r3, 4               ; x in FP12.4
                ldm r4, data.msl_y
-               shl r4, 4               ; y in FP12.4
-.handle_msCL:  cmpi r0, 8
+.handle_msCL:  cmpi r0, 16
                jz .handle_msD
                addi r0, 1
                add r3, r1
                add r4, r2
-               ; Check for collision with terrain
+               ;;; Check for collision with terrain
 .handle_msX:   mov r5, r4
                sar r5, 4            ; y
                ldm r6, data.msl_x
+               sar r6, 4
                andi r6, 0xfffe      ; 2px/col, 2B/col -> clear LSB
                addi r6, data.terrain
                ldm r8, r6
@@ -174,6 +189,7 @@ handle_msl:    ldm r0, data.msl_stat
                ldm r8, r6
                subi r8, 3
                stm r8, r6           ; blow top 2px off left neighbor column
+               call init_debris     ; create some impact particles
                bgc 0x8              ; background flashes yellow
                sng 0x04, 0xf3c6
                ldi r0, 500
@@ -181,17 +197,114 @@ handle_msl:    ldm r0, data.msl_stat
                vblnk
                ldi r0, 0
                stm r0, data.msl_stat ; reset missile status
-               ; Update dy to account for gravity
-.handle_msD:   sar r3, 4
-               stm r3, data.msl_x
-               sar r4, 4
+               jmp .handle_msZ
+               ;;; Update dy to account for gravity
+.handle_msD:   stm r3, data.msl_x
                stm r4, data.msl_y
                ldm r1, data.msl_dy
-               cmpi r1, 1536        ; 6 in FP8.8
+               cmpi r1, 1500        ; 6 in FP8.8
                jge .handle_msZ
                addi r1, 300         ; FP8.8 representation i.e. 1.13 or so
                stm r1, data.msl_dy
 .handle_msZ:   ret
+
+;-------------------
+init_debris:   ldi r1, 0
+               ldi r3, data.debris
+.init_debriL:  cmpi r1, 7
+               jz .init_debriZ
+               rnd r2, 5
+               subi r2, 3
+               ldm r0, data.msl_x
+               sar r0, 4
+               add r2, r0
+               stm r2, r3           ; debris[i].x = rand(-3, 2) + msl.x
+               addi r3, 2
+               rnd r2, 512
+               subi r2, 1024
+               stm r2, r3           ; debris[i].dy = rand(-4, -2) IN FP8.8
+               addi r3, 2
+               ldm r0, data.msl_y
+               sar r0, 4
+               stm r0, r3           ; debris[i].y = msl.y
+               addi r3, 2
+               addi r1, 1
+               jmp .init_debriL
+.init_debriZ:  ldi r0, 1
+               stm r0, data.drw_debris
+               ret
+
+;------------------
+handle_debris: ldm r0, data.drw_debris
+               cmpi r0, 1
+               jnz .handle_debrZ
+               ldi r0, 0
+               ldi r1, data.debris
+.handle_debrL: cmpi r0, 7
+               jz .handle_debrZ
+               addi r1, 2
+               ldm r2, r1
+               addi r1, 2
+               ldm r3, r1
+               mov r4, r2
+               sar r4, 8
+               add r3, r4
+               stm r3, r1
+               subi r1, 2
+               cmpi r4, 5
+               jz .handle_debrA
+               addi r2, 32
+               stm r2, r1
+.handle_debrA: addi r1, 4
+               addi r0, 1
+               jmp .handle_debrL
+.handle_debrZ: ret
+
+;-----------------
+drw_debris:    ldm r0, data.drw_debris
+               cmpi r0, 1
+               jnz .drw_debrZ
+               ldi r0, 0
+               ldi r1, data.debris
+.drw_debrL:    cmpi r0, 7
+               jz .drw_debrZ
+               ldm r2, r1
+               addi r1, 4
+               ldm r3, r1
+               spr 0x0101
+               tsti r0, 2
+               jz .drw_debrD
+               spr 0x0301
+.drw_debrD:    drw r2, r3, data.spr
+               addi r1, 2
+               addi r0, 1
+               jmp .drw_debrL
+.drw_debrZ:    ret
+
+;---------------
+gen_spr:       ldi r3, data.spr
+               ldi r0, 0
+.gen_sprL:     cmpi r0, 256
+               jz .gen_sprZ
+               rnd r1, 255
+               cmpi r1, 160
+               jl .gen_spr1
+               ldi r2, 0x5555
+               jmp .gen_sprY
+.gen_spr1:     cmpi r1, 100
+               jl .gen_spr2
+               ldi r2, 0x3333
+               jmp .gen_sprY
+.gen_spr2:     cmpi r1, 64
+               jl .gen_spr3
+               ldi r2, 0x5335
+               jmp .gen_sprY
+.gen_spr3:     ldi r2, 0x3553
+.gen_sprY:     stm r2, r3
+               addi r3, 4
+               addi r0, 4
+               jmp .gen_sprL
+.gen_sprZ:     ret
 
 ;--------------------------------------
 ; gen_columns --
@@ -333,7 +446,9 @@ drw_msl:       ldm r0, data.msl_stat
                jz .drw_msZ
                spr 0x0101
                ldm r0, data.msl_x
+               sar r0, 4
                ldm r1, data.msl_y
+               sar r1, 4
                drw r0, r1, data.spr_msl
 .drw_msZ:      ret
 
@@ -446,10 +561,13 @@ data.p1_y:     dw 0
 data.p2_x:     dw 288
 data.p2_y:     dw 0
 data.msl_stat: dw 0
-data.msl_x:    dw 0
-data.msl_y:    dw 0
-data.msl_dx:   dw 0
-data.msl_dy:   dw 0
+data.msl_x:    dw 0  ; FP8.8
+data.msl_y:    dw 0  ; FP8.8
+data.msl_dx:   dw 0  ; FP8.8
+data.msl_dy:   dw 0  ; FP8.8
+
+data.drw_debris: dw 0
+data.debris:   dw 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0 ; FP8.8
 
 data.str_angle: db "Angle Deg"
                 db 0
