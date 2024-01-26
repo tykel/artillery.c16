@@ -14,10 +14,12 @@ CHAR_OFFS         equ 32
 ;
 ; Main game loop.
 ;---------------------------------------
-init:          call gen_columns
+init:          pal data.palette
+               call gen_columns
                call gen_spr
 loop:          cls
                bgc 1
+               call handle_plyr
                call handle_inp
                call handle_msl
                call handle_debris
@@ -27,6 +29,7 @@ loop:          cls
                call drw_target
                call drw_msl
                call drw_debris
+               call handle_win
                vblnk
                jmp loop
 
@@ -36,9 +39,50 @@ loop:          cls
 ; Common code to reset state. Not a subroutine.
 ;--------------------------------------
 reset:         ldi r0, 0
+               stm r0, data.win
+               stm r0, data.cur_plyr
+               stm r0, data.swap_plyr
                stm r0, data.msl_stat
                stm r0, data.drw_debris
                jmp init
+
+wait:          vblnk
+               subi r0, 1
+               jnz wait
+               ret
+
+other_plyr_x:  ldm r0, data.cur_plyr
+               xori r0, 1
+               shl r0, 2
+               addi r0, data.p1_x
+               ldm r0, r0
+               ret
+
+handle_plyr:   ldm r0, data.swap_plyr
+               cmpi r0, 1
+               jnz .handle_plZ
+               ldi r0, 0
+               stm r0, data.swap_plyr
+               ldm r0, data.cur_plyr
+               xori r0, 1
+               stm r0, data.cur_plyr
+.handle_plZ:   ret
+
+handle_win:    ldm r0, data.win
+               cmpi r0, 1
+               jnz .handle_wiZ
+               bgc 9
+               ldi r0, 30
+               call wait
+               bgc 1
+               ldi r0, 30
+               call wait
+               bgc 9
+               ldi r0, 90
+               call wait
+               ldi sp, 0xfdf0
+               jmp reset
+.handle_wiZ:   ret
 
 ;--------------------------------------
 ; handle_inp --
@@ -109,7 +153,7 @@ handle_msl:    ldm r0, data.msl_stat
                jnz .handle_msA
                ldi r0, 2
                stm r0, data.msl_stat   ; 2 == missile launched
-               bgc 0x2                 ; background flashes gray 
+               ;bgc 0x2                 ; background flashes gray 
                sng 0x02, 0xc3a1
                ldi r0, 1000
                snp r0, 100             ; play firing noise
@@ -149,11 +193,15 @@ handle_msl:    ldm r0, data.msl_stat
                jge .handle_msB
                ldi r0, 0
                stm r0, data.msl_stat
+               ldi r0, 1
+               stm r0, data.swap_plyr
                jmp .handle_msZ
 .handle_msB:   cmpi r0, 320
                jl .handle_msC
                ldi r0, 0
                stm r0, data.msl_stat
+               ldi r0, 1
+               stm r0, data.swap_plyr
                jmp .handle_msZ
 .handle_msC:   ldi r0, 0               ; 16 steps to more accurately find hit
                ldm r1, data.msl_dx
@@ -179,24 +227,40 @@ handle_msl:    ldm r0, data.msl_stat
                sub r7, r8
                cmp r5, r7           ; data.msl_y > (240 - col[data.msl_x]) ?
 .mmmm:         jl .handle_msCL
-               subi r8, 6
-               stm r8, r6           ; blow top 4px off column
+               ldm r9, data.msl_x
+               sar r9, 4
+               call other_plyr_x
+               sub r9, r0, r0
+               cmpi r0, -4
+               jl .handle_msXT
+               cmpi r0, 4
+               jge .handle_msXT
+               ldi r9, 1
+               stm r9, data.win
+.handle_msXT:  subi r8, 3
+               stm r8, r6           ; blow top 3px off column
                addi r6, 2
-               ldm r8, r6
-               subi r8, 3
-               stm r8, r6           ; blow top 2px off right neighbor column
-               subi r6, 4
-               ldm r8, r6
-               subi r8, 3
-               stm r8, r6           ; blow top 2px off left neighbor column
-               call init_debris     ; create some impact particles
+               ldm r9, r6
+               cmp r8, r9
+               jge .handle_mR
+               stm r8, r6           ; blow top 1px off right neighbor column
+.handle_mR:    subi r6, 4
+               ldm r9, r6
+               cmp r8, r9
+               jge .handle_mDeb
+               stm r8, r6           ; blow top 1px off left neighbor column
+.handle_mDeb:  call init_debris     ; create some impact particles
                bgc 0x8              ; background flashes yellow
                sng 0x04, 0xf3c6
                ldi r0, 500
                snp r0, 300          ; play impact noise
                vblnk
+               vblnk
+               vblnk
                ldi r0, 0
                stm r0, data.msl_stat ; reset missile status
+               ldi r0, 1
+               stm r0, data.swap_plyr
                jmp .handle_msZ
                ;;; Update dy to account for gravity
 .handle_msD:   stm r3, data.msl_x
@@ -204,7 +268,7 @@ handle_msl:    ldm r0, data.msl_stat
                ldm r1, data.msl_dy
                cmpi r1, 1500        ; 6 in FP8.8
                jge .handle_msZ
-               addi r1, 300         ; FP8.8 representation i.e. 1.13 or so
+               addi r1, 150         ; FP8.8 representation i.e. 1.13 or so
                stm r1, data.msl_dy
 .handle_msZ:   ret
 
@@ -289,17 +353,17 @@ gen_spr:       ldi r3, data.spr
                rnd r1, 255
                cmpi r1, 160
                jl .gen_spr1
-               ldi r2, 0x5555
+               ldi r2, 0x4465
                jmp .gen_sprY
 .gen_spr1:     cmpi r1, 100
                jl .gen_spr2
-               ldi r2, 0x3333
+               ldi r2, 0x6476
                jmp .gen_sprY
 .gen_spr2:     cmpi r1, 64
                jl .gen_spr3
-               ldi r2, 0x5335
+               ldi r2, 0x7645
                jmp .gen_sprY
-.gen_spr3:     ldi r2, 0x3553
+.gen_spr3:     ldi r2, 0x6576
 .gen_sprY:     stm r2, r3
                addi r3, 4
                addi r0, 4
@@ -335,12 +399,12 @@ gen_columns:
              subi r7, 2             ; (u8*)col + x - 2
              ldm r7, r7             ; *((u8*)col + x - 2)
              mov r0, r7
-             subi r0, 2
+             subi r0, 4
              cmpi r0, 1
              jge .gen_colLLa
              ldi r0, 1              ; r0 = max(1, col[x - 1] - 2)
 .gen_colLLa: mov r1, r7
-             addi r1, 2
+             addi r1, 4
              cmpi r1, 239
              jle .gen_colLLb
              ldi r1, 239            ; r1 = min(239, col[x - 1] + 2)
@@ -458,6 +522,21 @@ drw_msl:       ldm r0, data.msl_stat
 ; Display the user interface sprites.
 ;--------------------------------------
 drw_hud:       nop
+               ; Draw "Player:"
+               ldi r0, data.str_plyr
+               ldi r1, 16
+               ldi r2, 16
+               call drw_str
+               ; Draw player number 
+               ldm r0, data.cur_plyr
+               addi r0, 1              ; make it 1 or 2, instead of 0 or 1
+               ldi r1, data.str_bcd3
+               call tobcd3
+               ldi r0, data.str_bcd3
+               ldi r1, 64
+               ldi r2, 16
+               call drw_str
+
                ; Draw "Angle:"
                ldi r0, data.str_angle
                ldi r1, 240
@@ -551,6 +630,8 @@ drw_str:       spr 0x0804                 ; Font sprite size is 8x8
 ;--------------------------------------
 ; Data declarations
 ;--------------------------------------
+data.swap_plyr: dw 0
+data.win:      dw 0
 data.cur_plyr: dw 0
 data.cur_ang:  dw 135
 data.cur_pow:  dw 50
@@ -569,11 +650,30 @@ data.msl_dy:   dw 0  ; FP8.8
 data.drw_debris: dw 0
 data.debris:   dw 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0 ; FP8.8
 
+data.str_plyr: db "Player:"
+               db 0
 data.str_angle: db "Angle Deg"
                 db 0
 data.str_power: db "Power %"
                 db 0
 data.str_bcd3: db 0,0,0,0
+
+data.palette:  db 0,0,0
+               db 0,0,0
+               db 0x7a,0x51,0x1f ;30% 		 #7a511f
+               db 0x65,0x44,0x1a ;25% 		 #65441a
+               db 0x51,0x36,0x15 ;20% 		 #513615
+               db 0x3d,0x29,0x10 ;15% 		 #3d2910
+               db 0x29,0x1b,0x0a ;10% 		 #291b0a
+               db 0x14,0x0e,0x05 ;5% 		 #140e05
+               db 0xea,0xd9,0x79
+               db 0x53,0x7a,0x3b
+               db 0xab,0xd5,0x4a
+               db 0x25,0x2e,0x38
+               db 0x00,0x46,0x7f
+               db 0x68,0xab,0xcc
+               db 0xbc,0xde,0xe4
+               db 0xff,0xff,0xff
 
 data.terrain:  dw 0, 0, 0, 0, 0, 0, 0, 0  ; 2B x 8 x 20 rows = 320 B
                dw 0, 0, 0, 0, 0, 0, 0, 0
@@ -637,7 +737,7 @@ data.spr_msl:  db 0x80
 
 data.spr_cnn:  db 0xff, 0xff, 0xff, 0xff
 
-data.spr_tgt:  db 0x33, 0x33 0x30, 0x03, 0x30, 0x03, 0x33, 0x33
+data.spr_tgt:  db 0xcc, 0xcc 0xc0, 0x0c, 0xc0, 0x0c, 0xcc, 0xcc
 
 ; FP8.8 LUT of R * sin and R * cos for angles [0..180] degrees
 include lut.s
