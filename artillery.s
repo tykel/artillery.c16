@@ -15,7 +15,16 @@ CHAR_OFFS         equ 32
 ; Main game loop.
 ;---------------------------------------
 init:          pal data.palette
-               call gen_columns
+
+menu:          cls
+               call handle_menu
+               call drw_title
+               vblnk
+               ldm r0, data.start
+               cmpi r0, 1
+               jnz menu
+
+game:          call gen_columns
                call gen_spr
                ldi r0, 0
                call ld_plyr_cur
@@ -41,6 +50,7 @@ loop:          cls
 ; Common code to reset state. Not a subroutine.
 ;--------------------------------------
 reset:         ldi r0, 0
+               stm r0, data.start
                stm r0, data.win
                stm r0, data.cur_plyr
                stm r0, data.swap_plyr
@@ -69,6 +79,32 @@ other_plyr_x:  ldm r0, data.cur_plyr
                addi r0, data.p1_x
                ldm r0, r0
                ret
+
+;--------------------------------------
+; handle_menu --
+;
+; Handle input at menu screen.
+;--------------------------------------
+handle_menu:   ldm r0, 0xfff0
+               ldm r1, data.need_rls
+               cmpi r1, 1
+               jnz .handle_men0
+               cmpi r0, 0
+               jnz .handle_menZ
+               stm r0, data.need_rls
+.handle_men0:  tsti r0, 16       ; Select
+               jz .handle_menA
+               ldm r1, data.cpu_plyr
+               xori r1, 1
+               stm r1, data.cpu_plyr
+               ldi r1, 1
+               stm r1, data.need_rls   ; Require button release
+               jmp .handle_menZ
+.handle_menA:  tsti r0, 32       ; Start
+               jz .handle_menZ
+               ldi r1, 1
+               stm r1, data.start
+.handle_menZ:  ret
 
 ;--------------------------------------
 ; handle_plyr --
@@ -158,7 +194,13 @@ handle_win:    ldm r0, data.win
 ; Update angle, and missile fire status, from controller input.
 ;--------------------------------------
 handle_inp:    ldm r0, 0xfff0
-               tsti r0, 1           ; Up button
+               ldm r1, data.need_rls
+               cmpi r1, 1
+               jnz .handle_in0
+               cmpi r0, 0
+               jnz .handle_inZ
+               stm r0, data.need_rls
+.handle_in0:   tsti r0, 1           ; Up button
                jz .handle_inA
                ldm r1, data.cur_pow
                cmpi r1, 100
@@ -197,6 +239,7 @@ handle_inp:    ldm r0, 0xfff0
                jnz .handle_inZ
                addi r1, 1
                stm r1, data.msl_stat ; A -> if missile status was ready, change to fire
+               stm r1, data.need_rls
                jmp .handle_inZ
 .handle_inE:   tsti r0, 16          ; Select button
                jz .handle_inZ
@@ -604,6 +647,37 @@ drw_msl:       ldm r0, data.msl_stat
                drw r0, r1, data.spr_msl
 .drw_msZ:      ret
 
+drw_title:     ; Draw Title text
+               ldi r0, data.str_title
+               ldi r1, 72
+               ldi r2, 80
+               call drw_str
+               ; Draw "Player 1 vs. Player 2"
+               ldi r0, data.str_p1vp2
+               ldi r1, 64
+               ldi r2, 144
+               call drw_str
+               ; Draw "Player 1 vs. CPU"
+               ldi r0, data.str_p1vcp
+               ldi r1, 64
+               ldi r2, 160
+               call drw_str
+               ; Draw copyright text
+               ldi r0, data.str_copyr
+               ldi r1, 16
+               ldi r2, 224
+               call drw_str
+               
+               ; Draw option select sprite
+               spr 0x0402
+               ldi r0, 56
+               ldi r1, 146
+               ldm r2, data.cpu_plyr
+               shl r2, 4
+               add r1, r2
+               drw r0, r1, data.spr_tgt
+               ret
+
 ;--------------------------------------
 ; drw_hud --
 ;
@@ -718,6 +792,8 @@ drw_str:       spr 0x0804                 ; Font sprite size is 8x8
 ;--------------------------------------
 ; Data declarations
 ;--------------------------------------
+data.start:    dw 0
+data.need_rls: dw 0
 data.swap_plyr: dw 0
 data.win:      dw 0
 data.cur_plyr: dw 0
@@ -737,6 +813,8 @@ data.msl_y:    dw 0  ; FP8.8
 data.msl_dx:   dw 0  ; FP8.8
 data.msl_dy:   dw 0  ; FP8.8
 
+data.cpu_plyr: dw 0
+
 data.drw_debris: dw 0
 data.debris:   dw 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0 ; FP8.8
 
@@ -746,6 +824,15 @@ data.str_angle: db "Angle Deg"
                 db 0
 data.str_power: db "Power %"
                 db 0
+data.str_title: db "C___A___N___N___O___N"
+                db 0
+data.str_p1vp2: db "Player 1 vs. Player 2"
+                db 0
+data.str_p1vcp: db "Player 1 vs. CPU"
+                db 0
+data.str_copyr: db "Copyright (C) 2023-2024 Tim Kelsall."
+                db 0
+
 data.str_bcd3: db 0,0,0,0
 
 data.palette:  db 0,0,0
