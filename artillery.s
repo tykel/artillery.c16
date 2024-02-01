@@ -17,6 +17,8 @@ CHAR_OFFS         equ 32
 init:          pal data.palette
                call gen_columns
                call gen_spr
+               ldi r0, 0
+               call ld_plyr_cur
 loop:          cls
                bgc 1
                call handle_plyr
@@ -53,7 +55,7 @@ wait:          vblnk
 
 other_plyr_x:  ldm r0, data.cur_plyr
                xori r0, 1
-               shl r0, 2
+               shl r0, 1
                addi r0, data.p1_x
                ldm r0, r0
                ret
@@ -63,10 +65,41 @@ handle_plyr:   ldm r0, data.swap_plyr
                jnz .handle_plZ
                ldi r0, 0
                stm r0, data.swap_plyr
+               ; Save current player [ang, x, y] to p1 or p2
                ldm r0, data.cur_plyr
+               call st_plyr_cur
+               ; Swap the current player index
                xori r0, 1
                stm r0, data.cur_plyr
+               ; Load new current player [ang, x, y] from p1 or p2
+               call ld_plyr_cur
 .handle_plZ:   ret
+
+ld_plyr_cur:   mov r1, r0
+               shl r1, 1
+               addi r1, data.p1_ang
+               ldm r2, r1
+               stm r2, data.cur_ang
+               addi r1, 4 ; data.p1_x
+               ldm r2, r1
+               stm r2, data.cur_x
+               addi r1, 4 ; data.p1_y
+               ldm r2, r1
+               stm r2, data.cur_y
+               ret
+
+st_plyr_cur:   mov r1, r0
+               shl r1, 1
+               addi r1, data.p1_ang
+               ldm r2, data.cur_ang
+               stm r2, r1
+               addi r1, 4 ; data.p1_x
+               ldm r2, data.cur_x
+               stm r2, r1
+               addi r1, 4 ; data.p1_y
+               ldm r2, data.cur_y
+               stm r2, r1
+               ret
 
 handle_win:    ldm r0, data.win
                cmpi r0, 1
@@ -158,10 +191,10 @@ handle_msl:    ldm r0, data.msl_stat
                ldi r0, 1000
                snp r0, 100             ; play firing noise
                ;;; Load player cannon x, y
-               ldm r0, data.p1_x
+               ldm r0, data.cur_x
                shl r0, 4
                stm r0, data.msl_x      ; FP12.4
-               ldm r0, data.p1_y
+               ldm r0, data.cur_y
                shl r0, 4               ; FP12.4
                stm r0, data.msl_y
                ;;; Compute initial dx, dy from angle and power
@@ -492,16 +525,17 @@ drw_target:    spr 0x0402              ; target is 4x4 pixels
                mov r2, r1
                addi r2, 2
                ldm r1, r1
-               addi r1, 0x2000         ; 16 in FP8.8
-               shr r1, 8
+               sar r1, 8
+.bp:           ldm r3, data.cur_x
+               add r1, r3
                ldm r2, r2
                sar r2, 4
-               ldm r3, data.p1_y
+               ldm r3, data.cur_y
                shl r3, 4
                add r2, r3
-               shr r2, 4
+               sar r2, 4
                subi r1, 2
-               subi r2, 4              ; center the sprite
+               subi r2, 10             ; center the sprite
                drw r1, r2, data.spr_tgt
                ret
 
@@ -633,13 +667,15 @@ drw_str:       spr 0x0804                 ; Font sprite size is 8x8
 data.swap_plyr: dw 0
 data.win:      dw 0
 data.cur_plyr: dw 0
-data.cur_ang:  dw 135
+data.cur_ang:  dw 0
+data.cur_x:    dw 0
+data.cur_y:    dw 0
 data.cur_pow:  dw 50
-data.p0_ang:   dw 0
-data.p1_ang:   dw 0
+data.p1_ang:   dw 135
+data.p2_ang:   dw 45
 data.p1_x:     dw 32
-data.p1_y:     dw 0
 data.p2_x:     dw 288
+data.p1_y:     dw 0
 data.p2_y:     dw 0
 data.msl_stat: dw 0
 data.msl_x:    dw 0  ; FP8.8
