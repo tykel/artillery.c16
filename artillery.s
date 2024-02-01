@@ -2,7 +2,7 @@
 ; artillery.s
 ;
 ; Clone of Scorched Earth for Chip16.
-; Copyright (C) 2023, Tim Kelsall.
+; Copyright (C) 2023-2024 Tim Kelsall.
 ;
 ;-----------------------------------------------------------------------------
 
@@ -48,11 +48,21 @@ reset:         ldi r0, 0
                stm r0, data.drw_debris
                jmp init
 
+;--------------------------------------
+; wait --
+;
+; Wait for the number of frames passed in r0.
+;--------------------------------------
 wait:          vblnk
                subi r0, 1
                jnz wait
                ret
 
+;--------------------------------------
+; other_plyr_x --
+;
+; Utility function to get non-current player's x coordinate.
+;--------------------------------------
 other_plyr_x:  ldm r0, data.cur_plyr
                xori r0, 1
                shl r0, 1
@@ -60,6 +70,13 @@ other_plyr_x:  ldm r0, data.cur_plyr
                ldm r0, r0
                ret
 
+;--------------------------------------
+; handle_plyr --
+;
+; If in "swap players" state, flush the current player state, swap the current
+; player index, and cache the new current player state. Leave "swap players"
+; state.
+;--------------------------------------
 handle_plyr:   ldm r0, data.swap_plyr
                cmpi r0, 1
                jnz .handle_plZ
@@ -75,6 +92,12 @@ handle_plyr:   ldm r0, data.swap_plyr
                call ld_plyr_cur
 .handle_plZ:   ret
 
+;--------------------------------------
+; ld_plyr_cur --
+;
+; Load the currently-playing player state to the "current player" state.
+; Called immediately after switching the current player index.
+;--------------------------------------
 ld_plyr_cur:   mov r1, r0
                shl r1, 1
                addi r1, data.p1_ang
@@ -88,6 +111,12 @@ ld_plyr_cur:   mov r1, r0
                stm r2, data.cur_y
                ret
 
+;--------------------------------------
+; st_plyr_cur --
+;
+; Store "current player" state to the currently-playing player state.
+; This will be called to flush state before switching the current player.
+;--------------------------------------
 st_plyr_cur:   mov r1, r0
                shl r1, 1
                addi r1, data.p1_ang
@@ -101,6 +130,12 @@ st_plyr_cur:   mov r1, r0
                stm r2, r1
                ret
 
+;--------------------------------------
+; handle_win --
+;
+; Perform screen flashes over 2.5 seconds if we are in a "win" state, then
+; reset.
+;--------------------------------------
 handle_win:    ldm r0, data.win
                cmpi r0, 1
                jnz .handle_wiZ
@@ -305,7 +340,11 @@ handle_msl:    ldm r0, data.msl_stat
                stm r1, data.msl_dy
 .handle_msZ:   ret
 
-;-------------------
+;--------------------------------------
+; init_debris --
+;
+; Initialize a debris array and switch to "draw debris" state.
+;--------------------------------------
 init_debris:   ldi r1, 0
                ldi r3, data.debris
 .init_debriL:  cmpi r1, 7
@@ -331,7 +370,11 @@ init_debris:   ldi r1, 0
                stm r0, data.drw_debris
                ret
 
-;------------------
+;--------------------------------------
+; handle_debris --
+;
+; Update the debris' position and velocity, if in a "draw debris" state.
+;--------------------------------------
 handle_debris: ldm r0, data.drw_debris
                cmpi r0, 1
                jnz .handle_debrZ
@@ -357,7 +400,11 @@ handle_debris: ldm r0, data.drw_debris
                jmp .handle_debrL
 .handle_debrZ: ret
 
-;-----------------
+;--------------------------------------
+; drw_debris --
+;
+; Draw the 8 debris particles, if we are in a "draw debris" state.
+;--------------------------------------
 drw_debris:    ldm r0, data.drw_debris
                cmpi r0, 1
                jnz .drw_debrZ
@@ -378,7 +425,11 @@ drw_debris:    ldm r0, data.drw_debris
                jmp .drw_debrL
 .drw_debrZ:    ret
 
-;---------------
+;--------------------------------------
+; gen_spr --
+;
+; Generate a random terrain column sprite.
+;--------------------------------------
 gen_spr:       ldi r3, data.spr
                ldi r0, 0
 .gen_sprL:     cmpi r0, 256
@@ -516,6 +567,9 @@ drw_cannons:   spr 0x0401              ; cannons are 2x4 pixels
 
 ;--------------------------------------
 ; drw_target --
+;
+; Draw the visual target used to aim the cannon.
+; Use a lookup table to map angle to x/y offsets.
 ;--------------------------------------
 drw_target:    spr 0x0402              ; target is 4x4 pixels
                ldm r0, data.cur_ang
