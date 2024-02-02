@@ -9,6 +9,9 @@
 importbin font.bin 0 3072 data.font
 CHAR_OFFS         equ 32
 
+P1_TRAILS         equ 0x3000
+P2_TRAILS         equ 0x3060
+
 ;---------------------------------------
 ; init / loop --
 ;
@@ -20,6 +23,9 @@ menu:          cls
                call handle_menu
                call drw_title
                vblnk
+               ldm r0, data.f_nb
+               addi r0, 1
+               stm r0, data.f_nb
                ldm r0, data.start
                cmpi r0, 1
                jnz menu
@@ -28,6 +34,7 @@ game:          call gen_columns
                call gen_spr
                ldi r0, 0
                call ld_plyr_cur
+               call init_wind
 loop:          cls
                bgc 1
                call handle_plyr
@@ -41,7 +48,11 @@ loop:          cls
                call drw_msl
                call drw_debris
                call handle_win
-               vblnk
+               ldm r0, data.n_vblnk
+               call wait
+               ldm r0, data.f_nb
+               addi r0, 1
+               stm r0, data.f_nb
                jmp loop
 
 ;--------------------------------------
@@ -66,6 +77,17 @@ reset:         ldi r0, 0
 wait:          vblnk
                subi r0, 1
                jnz wait
+               ret
+
+;--------------------------------------
+; init_wind --
+;
+; Choose a random wind speed.
+; Negative implies "West", positive "East".
+;--------------------------------------
+init_wind:     rnd r0, 256          ; [ 0..1] in FP8.8
+               subi r0, 128         ; [-0.5 .. 0.5] in FP8.8
+               stm r0, data.wind_dx
                ret
 
 ;--------------------------------------
@@ -101,9 +123,17 @@ handle_menu:   ldm r0, 0xfff0
                stm r1, data.need_rls   ; Require button release
                jmp .handle_menZ
 .handle_menA:  tsti r0, 32       ; Start
-               jz .handle_menZ
+               jz .handle_menB
                ldi r1, 1
                stm r1, data.start
+               jmp .handle_menZ
+.handle_menB:  tsti r0, 64       ; A
+               jz .handle_menZ
+               ldm r1, data.n_vblnk
+               xori r1, 3
+               stm r1, data.n_vblnk
+               ldi r1, 1
+               stm r1, data.need_rls   ; Require button release
 .handle_menZ:  ret
 
 ;--------------------------------------
@@ -145,6 +175,9 @@ ld_plyr_cur:   mov r1, r0
                addi r1, 4 ; data.p1_y
                ldm r2, r1
                stm r2, data.cur_y
+               addi r1, 4 ; data.p1_pow
+               ldm r2, r1
+               stm r2, data.cur_pow
                ret
 
 ;--------------------------------------
@@ -163,6 +196,9 @@ st_plyr_cur:   mov r1, r0
                stm r2, r1
                addi r1, 4 ; data.p1_y
                ldm r2, data.cur_y
+               stm r2, r1
+               addi r1, 4 ; data.p1_pow
+               ldm r2, data.cur_pow
                stm r2, r1
                ret
 
@@ -298,7 +334,7 @@ handle_msl:    ldm r0, data.msl_stat
                ;-------------------------
 .handle_msA:   cmpi r0, 2
                jnz .handle_msZ
-.mmm:          ldm r0, data.msl_x
+               ldm r0, data.msl_x
                sar r0, 4
                cmpi r0, 0
                jge .handle_msB
@@ -337,7 +373,7 @@ handle_msl:    ldm r0, data.msl_stat
                ldi r7, 240
                sub r7, r8
                cmp r5, r7           ; data.msl_y > (240 - col[data.msl_x]) ?
-.mmmm:         jl .handle_msCL
+               jl .handle_msCL
                ldm r9, data.msl_x
                sar r9, 4
                call other_plyr_x
@@ -377,10 +413,15 @@ handle_msl:    ldm r0, data.msl_stat
 .handle_msD:   stm r3, data.msl_x
                stm r4, data.msl_y
                ldm r1, data.msl_dy
-               cmpi r1, 1500        ; 6 in FP8.8
-               jge .handle_msZ
+               cmpi r1, 2000        ; 6 in FP8.8
+               jge .handle_msE
                addi r1, 150         ; FP8.8 representation i.e. 1.13 or so
                stm r1, data.msl_dy
+               ;;; Update dx to account for wind
+.handle_msE:   ldm r1, data.msl_dx
+               ldm r2, data.wind_dx
+               add r1, r2
+               stm r1, data.msl_dx
 .handle_msZ:   ret
 
 ;--------------------------------------
@@ -526,12 +567,12 @@ gen_columns:
              subi r7, 2             ; (u8*)col + x - 2
              ldm r7, r7             ; *((u8*)col + x - 2)
              mov r0, r7
-             subi r0, 4
+             subi r0, 3
              cmpi r0, 1
              jge .gen_colLLa
              ldi r0, 1              ; r0 = max(1, col[x - 1] - 2)
 .gen_colLLa: mov r1, r7
-             addi r1, 4
+             addi r1, 3
              cmpi r1, 239
              jle .gen_colLLb
              ldi r1, 239            ; r1 = min(239, col[x - 1] + 2)
@@ -650,32 +691,60 @@ drw_msl:       ldm r0, data.msl_stat
 drw_title:     ; Draw Title text
                ldi r0, data.str_title
                ldi r1, 72
-               ldi r2, 80
+               ldi r2, 40
                call drw_str
-               ; Draw "Player 1 vs. Player 2"
-               ldi r0, data.str_p1vp2
+
+               ; Draw Start game text
+               ldm r0, data.f_nb
+               tsti r0, 32
+               jz .drw_titl0
+               ldi r0, data.str_start
+               ldi r1, 64
+               ldi r2, 96
+               call drw_str
+
+               ; Draw Game mode text
+.drw_titl0:    ldi r0, data.str_gmode
                ldi r1, 64
                ldi r2, 144
                call drw_str
-               ; Draw "Player 1 vs. CPU"
+               ldi r0, data.str_p1vp2
+               ldm r1, data.cpu_plyr
+               cmpi r1, 1
+               jnz .drw_titlA
                ldi r0, data.str_p1vcp
-               ldi r1, 64
-               ldi r2, 160
+.drw_titlA:    ldi r1, 160
+               ldi r2, 144
                call drw_str
+               ldi r0, data.str_togSel
+               ldi r1, 64
+               ldi r2, 156
+               call drw_str
+               
+               ; Draw game speed text
+               ldi r0, data.str_gspd
+               ldi r1, 64
+               ldi r2, 184
+               call drw_str
+               ldi r0, data.str_normal
+               ldm r1, data.n_vblnk
+               cmpi r1, 2
+               jz .drw_titlB
+               ldi r0, data.str_fast
+.drw_titlB:    ldi r1, 160
+               ldi r2, 184
+               call drw_str
+               ldi r0, data.str_togA
+               ldi r1, 64
+               ldi r2, 196
+               call drw_str
+
                ; Draw copyright text
                ldi r0, data.str_copyr
                ldi r1, 16
                ldi r2, 224
                call drw_str
                
-               ; Draw option select sprite
-               spr 0x0402
-               ldi r0, 56
-               ldi r1, 146
-               ldm r2, data.cpu_plyr
-               shl r2, 4
-               add r1, r2
-               drw r0, r1, data.spr_tgt
                ret
 
 ;--------------------------------------
@@ -699,9 +768,38 @@ drw_hud:       nop
                ldi r2, 16
                call drw_str
 
+               ; Draw "Wind:"
+               ldi r0, data.str_wind
+               ldi r1, 16
+               ldi r2, 32
+               call drw_str
+               ; Draw wind value below
+               ldi r3, data.str_e
+               ldm r0, data.wind_dx
+               cmpi r0, 0
+               jge .drw_huA
+               ldi r3, data.str_w
+               neg r0
+.drw_huA:      ;sar r0, 4
+               push r3
+               ldi r1, data.str_bcd3
+               call tobcd3
+               ldi r0, data.str_bcd3
+               ldi r1, 64
+               ldi r2, 32
+               call drw_str
+               pop r0
+               ldi r1, 88
+               ldi r2, 32
+               call drw_str
+               ldi r0, data.str_wind2
+               ldi r1, 104
+               ldi r2, 32
+               call drw_str
+
                ; Draw "Angle:"
                ldi r0, data.str_angle
-               ldi r1, 240
+               ldi r1, 200
                ldi r2, 16
                call drw_str
                ; Draw angle value below
@@ -710,13 +808,17 @@ drw_hud:       nop
                call tobcd3
                ldi r0, data.str_bcd3
                ldi r1, 256
-               ldi r2, 32
+               ldi r2, 16
+               call drw_str
+               ldi r0, data.str_angle2
+               ldi r1, 288
+               ldi r2, 16
                call drw_str
                
                ; Draw "Power:"
                ldi r0, data.str_power
-               ldi r1, 240
-               ldi r2, 64
+               ldi r1, 200
+               ldi r2, 32
                call drw_str
                ; Draw power value below
                ldm r0, data.cur_pow
@@ -724,7 +826,11 @@ drw_hud:       nop
                call tobcd3
                ldi r0, data.str_bcd3
                ldi r1, 256
-               ldi r2, 80
+               ldi r2, 32
+               call drw_str
+               ldi r0, data.str_power2
+               ldi r1, 288
+               ldi r2, 32
                call drw_str
 
                ret
@@ -800,18 +906,24 @@ data.cur_plyr: dw 0
 data.cur_ang:  dw 0
 data.cur_x:    dw 0
 data.cur_y:    dw 0
-data.cur_pow:  dw 50
+data.cur_pow:  dw 0
 data.p1_ang:   dw 135
 data.p2_ang:   dw 45
 data.p1_x:     dw 32
 data.p2_x:     dw 288
 data.p1_y:     dw 0
 data.p2_y:     dw 0
+data.p1_pow:   dw 25
+data.p2_pow:   dw 25
 data.msl_stat: dw 0
 data.msl_x:    dw 0  ; FP8.8
 data.msl_y:    dw 0  ; FP8.8
 data.msl_dx:   dw 0  ; FP8.8
 data.msl_dy:   dw 0  ; FP8.8
+data.wind_dx:  dw 0  ; FP8.8
+
+data.n_vblnk:  dw 2
+data.f_nb:     dw 0
 
 data.cpu_plyr: dw 0
 
@@ -820,19 +932,44 @@ data.debris:   dw 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0 ; FP8.8
 
 data.str_plyr: db "Player:"
                db 0
-data.str_angle: db "Angle Deg"
+data.str_angle: db "Angle:"
                 db 0
-data.str_power: db "Power %"
+data.str_angle2: db "deg"
+                 db 0
+data.str_power: db "Power:"
                 db 0
+data.str_power2: db "%"
+                 db 0
+data.str_wind: db "Wind:"
+               db 0
+data.str_wind2: db " / 128"
+                db 0
+data.str_w:    db " W"
+               db 0
+data.str_e:    db " E"
+               db 0
 data.str_title: db "C___A___N___N___O___N"
                 db 0
-data.str_p1vp2: db "Player 1 vs. Player 2"
+data.str_p1vp2: db "vs. Player 2"
                 db 0
-data.str_p1vcp: db "Player 1 vs. CPU"
+data.str_p1vcp: db "vs. CPU"
                 db 0
 data.str_copyr: db "Copyright (C) 2023-2024 Tim Kelsall."
                 db 0
-
+data.str_gmode: db "Game mode:"
+                db 0
+data.str_gspd: db "Game speed:"
+               db 0
+data.str_normal: db "NORMAL"
+                 db 0
+data.str_fast: db "FAST"
+               db 0
+data.str_togA: db "[Press A to toggle]"
+               db 0
+data.str_togSel: db "[Press SELECT to toggle]"
+                 db 0
+data.str_start: db "Press START to begin game"
+                db 0
 data.str_bcd3: db 0,0,0,0
 
 data.palette:  db 0,0,0
