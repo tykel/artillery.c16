@@ -12,6 +12,30 @@ CHAR_OFFS         equ 32
 P1_TRAILS         equ 0x3000
 P2_TRAILS         equ 0x3200
 
+P1_X              equ 32
+P2_X              equ 288
+
+DEFAULT_POW       equ 25
+
+;--------------------------------------
+; reset --
+;
+; Common code to reset state. Not a subroutine.
+;--------------------------------------
+reset:         ldi r0, 0
+               stm r0, data.start
+               stm r0, data.win
+               stm r0, data.cur_plyr
+               stm r0, data.swap_plyr
+               stm r0, data.msl_stat
+               stm r0, data.drw_debris
+               stm r0, data.p1_trls
+               stm r0, data.p2_trls
+               ldi r0, DEFAULT_POW
+               stm r0, data.cpu_lmsp
+               ldi r0, P1_X
+               stm r0, data.cpu_lmsx
+
 ;---------------------------------------
 ; init / loop --
 ;
@@ -38,6 +62,7 @@ game:          call gen_columns
 loop:          cls
                bgc 1
                call handle_plyr
+               call handle_cpu
                call handle_inp
                call handle_msl
                call handle_debris
@@ -55,20 +80,6 @@ loop:          cls
                addi r0, 1
                stm r0, data.f_nb
                jmp loop
-
-;--------------------------------------
-; reset --
-;
-; Common code to reset state. Not a subroutine.
-;--------------------------------------
-reset:         ldi r0, 0
-               stm r0, data.start
-               stm r0, data.win
-               stm r0, data.cur_plyr
-               stm r0, data.swap_plyr
-               stm r0, data.msl_stat
-               stm r0, data.drw_debris
-               jmp init
 
 ;--------------------------------------
 ; wait --
@@ -157,6 +168,8 @@ handle_plyr:   ldm r0, data.swap_plyr
                stm r0, data.cur_plyr
                ; Load new current player [ang, x, y] from p1 or p2
                call ld_plyr_cur
+               ldi r0, 60
+               stm r0, data.cpu_wait
 .handle_plZ:   ret
 
 ;--------------------------------------
@@ -204,6 +217,57 @@ st_plyr_cur:   mov r1, r0
                ret
 
 ;--------------------------------------
+; handle_cpu --
+;
+; Play for the computer ("CPU") player.
+; Strategy is as follows:
+; - Delay for 1 second as turn begins.
+; - Fire missile.
+;
+; TODO:
+; - Record last: missile hit X, power.
+; - Check whether missile overshot (msl.x < p1.x), or undershot (msl.x > p1.x).
+; - If missile overshot, decrease power.
+; - If missile undershot, increase power.
+; - Then fire missile.
+;
+; Could also think of a more complex scheme involving angles.
+;--------------------------------------
+handle_cpu:    ldm r0, data.cur_plyr
+               cmpi r0, 1
+               jnz .handle_cpZ
+               ldm r0, data.msl_stat
+               cmpi r0, 0
+               jnz .handle_cpZ
+               ldm r0, data.cpu_wait
+               subi r0, 1
+               stm r0, data.cpu_wait
+               jnn .handle_cpZ
+       
+.hc_load:      ldi r3, 3
+               ldm r1, data.cpu_lmsp
+               ldm r0, data.cpu_lmsx
+               subi r0, P1_X
+               jge .hc_dec
+
+.hc_inc:       cmpi r0, -32
+               jl .hc_inc1
+               shr r3, 1
+.hc_inc1:      sub r1, r3              ; Missile undershot -> decrease power
+               stm r1, data.cur_pow
+               jmp .handle_cpF
+
+.hc_dec:       cmpi r0, 32
+               jge .hc_dec1
+               shr r3, 1
+.hc_dec1:      add r1, r3              ; Missile overshot -> increase power
+               stm r1, data.cur_pow
+
+.handle_cpF:   ldi r0, 1
+               stm r0, data.msl_stat   ; Fire!
+.handle_cpZ:   ret
+
+;--------------------------------------
 ; handle_win --
 ;
 ; Perform screen flashes over 2.5 seconds if we are in a "win" state, then
@@ -232,12 +296,18 @@ handle_win:    ldm r0, data.win
 ;--------------------------------------
 handle_inp:    ldm r0, 0xfff0
                ldm r1, data.need_rls
-               cmpi r1, 1
-               jnz .handle_in0
+               cmpi r1, 0
+               jz .handle_in0
                cmpi r0, 0
                jnz .handle_inZ
                stm r0, data.need_rls
-.handle_in0:   tsti r0, 1           ; Up button
+.handle_in0:   ldm r1, data.cpu_plyr ; If mode is "vs. CPU", and p2's turn...
+               cmpi r1, 0            ; ... then only check for reset
+               jz .handle_inU
+               ldm r1, data.cur_plyr
+               cmpi r1, 1
+               jz .handle_inE
+.handle_inU:   tsti r0, 1           ; Up button
                jz .handle_inA
                ldm r1, data.cur_pow
                cmpi r1, 100
@@ -383,7 +453,13 @@ handle_msl:    ldm r0, data.msl_stat
                jl .handle_msCL
                ldm r9, data.msl_x
                sar r9, 4
-               call other_plyr_x
+               ldm ra, data.cur_plyr
+               cmpi ra, 1
+               jnz .handle_msXS
+.AAA:          stm r9, data.cpu_lmsx
+               ldm ra, data.cur_pow
+               stm ra, data.cpu_lmsp
+.handle_msXS:  call other_plyr_x
                sub r9, r0, r0
                cmpi r0, -4
                jl .handle_msXT
@@ -605,12 +681,12 @@ gen_columns:
              mov r1, r9
              addi r1, data.terrain
 .gen_colLT:  stm r0, r1             ; write col[x]
-             cmpi r9, 32
+             cmpi r9, P1_X
              jnz .zzzB
              ldi r2, 240
              sub r2, r0, r0
              stm r0, data.p1_y      ; store p1.y
-.zzzB:       cmpi r9, 288
+.zzzB:       cmpi r9, P2_X
              jnz .zzzC
              ldi r2, 240
              sub r2, r0, r0
@@ -974,12 +1050,12 @@ data.cur_y:    dw 0
 data.cur_pow:  dw 0
 data.p1_ang:   dw 135
 data.p2_ang:   dw 45
-data.p1_x:     dw 32
-data.p2_x:     dw 288
+data.p1_x:     dw P1_X
+data.p2_x:     dw P2_X
 data.p1_y:     dw 0
 data.p2_y:     dw 0
-data.p1_pow:   dw 25
-data.p2_pow:   dw 25
+data.p1_pow:   dw DEFAULT_POW
+data.p2_pow:   dw DEFAULT_POW
 data.p1_trls:  dw 0
 data.p2_trls:  dw 0
 data.msl_stat: dw 0
@@ -993,6 +1069,9 @@ data.n_vblnk:  dw 2
 data.f_nb:     dw 0
 
 data.cpu_plyr: dw 0
+data.cpu_wait: dw 0
+data.cpu_lmsx: dw 0  ; Last impact msl.x fired by CPU
+data.cpu_lmsp: dw 0  ; Last power fired by CPU
 
 data.drw_debris: dw 0
 data.debris:   dw 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0 ; FP8.8
