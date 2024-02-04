@@ -10,7 +10,7 @@ importbin font.bin 0 3072 data.font
 CHAR_OFFS         equ 32
 
 P1_TRAILS         equ 0x3000
-P2_TRAILS         equ 0x3060
+P2_TRAILS         equ 0x3200
 
 ;---------------------------------------
 ; init / loop --
@@ -47,6 +47,7 @@ loop:          cls
                call drw_target
                call drw_msl
                call drw_debris
+               call drw_trails
                call handle_win
                ldm r0, data.n_vblnk
                call wait
@@ -328,8 +329,14 @@ handle_msl:    ldm r0, data.msl_stat
                mul r3, r4
                stm r2, data.msl_dx     ; stored in FP8.8 format
                stm r3, data.msl_dy     ; stored in FP8.8 format
-               ldi r0, 2
+               ;;; Reset the trail counter for current player
+               ldi r0, 0
+               ldm r1, data.cur_plyr
+               shl r1, 1
+               addi r1, data.p1_trls
+               stm r0, r1
 
+               ldi r0, 2
                ; Update missile, launched
                ;-------------------------
 .handle_msA:   cmpi r0, 2
@@ -409,9 +416,27 @@ handle_msl:    ldm r0, data.msl_stat
                ldi r0, 1
                stm r0, data.swap_plyr
                jmp .handle_msZ
-               ;;; Update dy to account for gravity
 .handle_msD:   stm r3, data.msl_x
                stm r4, data.msl_y
+               ;;; Store missile position as next trail dot
+               sar r3, 4
+               sar r4, 4
+               ldm r5, data.cur_plyr
+               mov r8, r5
+               shl r5, 1
+               addi r5, data.p1_trls
+               ldm r6, r5           ; pN_trails
+               mov r7, r6
+               shl r7, 2
+               shl r8, 9            ; (p1) 0 -> 0, (p2) 1 -> 0x200
+               addi r8, P1_TRAILS   ; (p1) 0 -> 0x3000, (p2) 1 -> 0x3200
+               add r7, r8           ; offset into trails array (2x2B per entry)
+               stm r3, r7           ; pN_trail[i].x
+               addi r7, 2
+               stm r4, r7           ; pN_trail[i].y
+               addi r6, 1
+               stm r6, r5           ; pN_trails++
+               ;;; Update dy to account for gravity
                ldm r1, data.msl_dy
                cmpi r1, 2000        ; 6 in FP8.8
                jge .handle_msE
@@ -551,7 +576,7 @@ gen_columns:
              ldi r0, 16             ; col[0] height in [16..64]
              ldi r1, 64
              call gen_x_ranged
-.aaa:        ldi r8, data.terrain
+             ldi r8, data.terrain
 .gen_col0:   stm r0, r8
 
              ; Generate next columns iteratively
@@ -577,12 +602,12 @@ gen_columns:
              jle .gen_colLLb
              ldi r1, 239            ; r1 = min(239, col[x - 1] + 2)
 .gen_colLLb: call gen_x_ranged      ; gen_x_ranged(r0, r1)
-.zzz:        mov r1, r9
+             mov r1, r9
              addi r1, data.terrain
 .gen_colLT:  stm r0, r1             ; write col[x]
              cmpi r9, 32
              jnz .zzzB
-.zzzA:       ldi r2, 240
+             ldi r2, 240
              sub r2, r0, r0
              stm r0, data.p1_y      ; store p1.y
 .zzzB:       cmpi r9, 288
@@ -619,7 +644,7 @@ drw_columns:   ldi r1, 318
 .drw_colLp0:   mov r0, r1
                addi r0, data.terrain
                ldm r4, r0
-.xyz:          mov r2, r4
+               mov r2, r4
                shl r4, 8               ; move HH to high byte of word
                ori r4, 0x01            ; low byte of word = 1 for width of 2px
                stm r4, .drw_colsprB    ; store word in HHLL word of SPR instr.
@@ -664,7 +689,7 @@ drw_target:    spr 0x0402              ; target is 4x4 pixels
                addi r2, 2
                ldm r1, r1
                sar r1, 8
-.bp:           ldm r3, data.cur_x
+               ldm r3, data.cur_x
                add r1, r3
                ldm r2, r2
                sar r2, 4
@@ -677,6 +702,11 @@ drw_target:    spr 0x0402              ; target is 4x4 pixels
                drw r1, r2, data.spr_tgt
                ret
 
+;--------------------------------------
+; drw_msl --
+;
+; Draw the missile that the cannon launched.
+;--------------------------------------
 drw_msl:       ldm r0, data.msl_stat
                cmpi r0, 0
                jz .drw_msZ
@@ -688,6 +718,41 @@ drw_msl:       ldm r0, data.msl_stat
                drw r0, r1, data.spr_msl
 .drw_msZ:      ret
 
+;--------------------------------------
+; drw_trails --
+;--------------------------------------
+drw_trails:    spr 0x0101
+               ; Player 1 trails
+               ldm r0, data.p1_trls
+               ldi r1, P1_TRAILS
+.drw_trailL1:  cmpi r0, 0
+               jz .drw_trailP2
+               ldm r3, r1
+               addi r1, 2
+               ldm r4, r1
+               addi r1, 2
+               drw r3, r4, data.spr_msl
+               subi r0, 1
+               jmp .drw_trailL1
+               ; Player 2 trails
+.drw_trailP2:  ldm r0, data.p2_trls
+               ldi r1, P2_TRAILS
+.drw_trailL2:  cmpi r0, 0
+               jz .drw_trailZ
+               ldm r3, r1
+               addi r1, 2
+               ldm r4, r1
+               addi r1, 2
+               drw r3, r4, data.spr_msl
+               subi r0, 1
+               jmp .drw_trailL2
+.drw_trailZ:   ret
+
+;--------------------------------------
+; drw_title --
+;
+; Draw the title/menu screen.
+;--------------------------------------
 drw_title:     ; Draw Title text
                ldi r0, data.str_title
                ldi r1, 72
@@ -915,9 +980,11 @@ data.p1_y:     dw 0
 data.p2_y:     dw 0
 data.p1_pow:   dw 25
 data.p2_pow:   dw 25
+data.p1_trls:  dw 0
+data.p2_trls:  dw 0
 data.msl_stat: dw 0
-data.msl_x:    dw 0  ; FP8.8
-data.msl_y:    dw 0  ; FP8.8
+data.msl_x:    dw 0  ; FP12.4
+data.msl_y:    dw 0  ; FP12.4
 data.msl_dx:   dw 0  ; FP8.8
 data.msl_dy:   dw 0  ; FP8.8
 data.wind_dx:  dw 0  ; FP8.8
