@@ -1,4 +1,4 @@
-= Artillery.c16 =
+# Artillery.c16
 
 A game inspired by Scorched Earth and clones. Cannons take it in turn to fire
 shells, adjusting angle and launch power, and adjusting for wind speed.
@@ -6,7 +6,7 @@ shells, adjusting angle and launch power, and adjusting for wind speed.
 ![Title screen](images/menu.png)
 ![In-game](images/game.png)
 
-== Gameplay ==
+## Gameplay
 
 - Select:
 ..* Play against another player (uses only Controller 1, as it is turn based)
@@ -16,7 +16,7 @@ shells, adjusting angle and launch power, and adjusting for wind speed.
 ..* or fast, real-time game speed.
 - Aim with Up/Down buttons; fire with A button. Reset game with Select.
 
-== Technical details ==
+## Technical details
 
 - Uses a simple one-pass random terrain generation scheme.
 - Bot player uses feedback from previous shot to adjust power up/down, scaled
