@@ -9,11 +9,11 @@ shells, adjusting angle and launch power, and adjusting for wind speed.
 ## Gameplay
 
 - Select:
-..* Play against another player (uses only Controller 1, as it is turn based)
-..* Play against a bot ("CPU")
+  * Play against another player (uses only Controller 1, as it is turn based)
+  * Play against a bot ("CPU")
 - Select:
-..* regular, slowed-down game speed;
-..* or fast, real-time game speed.
+  * regular, slowed-down game speed;
+  * or fast, real-time game speed.
 - Aim with Up/Down buttons; fire with A button. Reset game with Select.
 
 ## Technical details
