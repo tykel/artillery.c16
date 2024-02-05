@@ -160,8 +160,15 @@ handle_plyr:   ldm r0, data.swap_plyr
                jnz .handle_plZ
                ldi r0, 0
                stm r0, data.swap_plyr
+               ; Save current state to last cpu state if applicable
+               ldm r0, data.msl_x
+               sar r0, 4
+               ldm r1, data.cur_plyr
+               cmpi r1, 1
+               jnz .handle_plyA
+               stm r0, data.cpu_lmsx
                ; Save current player [ang, x, y] to p1 or p2
-               ldm r0, data.cur_plyr
+.handle_plyA:  ldm r0, data.cur_plyr
                call st_plyr_cur
                ; Swap the current player index
                xori r0, 1
@@ -233,7 +240,10 @@ st_plyr_cur:   mov r1, r0
 ;
 ; Could also think of a more complex scheme involving angles.
 ;--------------------------------------
-handle_cpu:    ldm r0, data.cur_plyr
+handle_cpu:    ldm r0, data.cpu_plyr
+               cmpi r0, 1
+               jnz .handle_cpZ
+               ldm r0, data.cur_plyr
                cmpi r0, 1
                jnz .handle_cpZ
                ldm r0, data.msl_stat
@@ -265,6 +275,8 @@ handle_cpu:    ldm r0, data.cur_plyr
 
 .handle_cpF:   ldi r0, 1
                stm r0, data.msl_stat   ; Fire!
+               ldm r0, data.cur_pow
+               stm r0, data.cpu_lmsp
 .handle_cpZ:   ret
 
 ;--------------------------------------
@@ -427,14 +439,14 @@ handle_msl:    ldm r0, data.msl_stat
                ldi r0, 1
                stm r0, data.swap_plyr
                jmp .handle_msZ
-.handle_msC:   ldi r0, 0               ; 16 steps to more accurately find hit
+.handle_msC:   ldi r0, 0               ; 32 steps to more accurately find hit
                ldm r1, data.msl_dx
-               sar r1, 8               ; dx/8 in FP12.4, so shift.r (4+4)
+               sar r1, 9               ; dx/16 in FP12.4, so shift.r (4+4)
                ldm r2, data.msl_dy
-               sar r2, 8               ; dy/8 in FP12.4, so shift.r (4+4)
+               sar r2, 9               ; dy/16 in FP12.4, so shift.r (4+4)
                ldm r3, data.msl_x
                ldm r4, data.msl_y
-.handle_msCL:  cmpi r0, 16
+.handle_msCL:  cmpi r0, 32
                jz .handle_msD
                addi r0, 1
                add r3, r1
@@ -451,15 +463,9 @@ handle_msl:    ldm r0, data.msl_stat
                sub r7, r8
                cmp r5, r7           ; data.msl_y > (240 - col[data.msl_x]) ?
                jl .handle_msCL
+.handle_msXS:  call other_plyr_x
                ldm r9, data.msl_x
                sar r9, 4
-               ldm ra, data.cur_plyr
-               cmpi ra, 1
-               jnz .handle_msXS
-.AAA:          stm r9, data.cpu_lmsx
-               ldm ra, data.cur_pow
-               stm ra, data.cpu_lmsp
-.handle_msXS:  call other_plyr_x
                sub r9, r0, r0
                cmpi r0, -4
                jl .handle_msXT
