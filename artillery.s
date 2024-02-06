@@ -16,6 +16,8 @@ P1_X              equ 32
 P2_X              equ 288
 
 DEFAULT_POW       equ 25
+DEFAULT_P1_ANG    equ 135
+DEFAULT_P2_ANG    equ 45
 
 ;--------------------------------------
 ; reset --
@@ -29,12 +31,20 @@ reset:         ldi r0, 0
                stm r0, data.swap_plyr
                stm r0, data.msl_stat
                stm r0, data.drw_debris
+               stm r0, data.p1_y
+               stm r0, data.p2_y
                stm r0, data.p1_trls
                stm r0, data.p2_trls
                ldi r0, DEFAULT_POW
                stm r0, data.cpu_lmsp
+               stm r0, data.p1_pow
+               stm r0, data.p2_pow
                ldi r0, P1_X
                stm r0, data.cpu_lmsx
+               ldi r0, DEFAULT_P1_ANG
+               stm r0, data.p1_ang
+               ldi r0, DEFAULT_P2_ANG
+               stm r0, data.p2_ang
 
 ;---------------------------------------
 ; init / loop --
@@ -66,6 +76,7 @@ loop:          cls
                call handle_inp
                call handle_msl
                call handle_debris
+               
                call drw_hud
                call drw_columns
                call drw_cannons
@@ -155,7 +166,11 @@ handle_menu:   ldm r0, 0xfff0
 ; player index, and cache the new current player state. Leave "swap players"
 ; state.
 ;--------------------------------------
-handle_plyr:   ldm r0, data.swap_plyr
+handle_plyr:   ; Save current player [ang, x, y] to p1 or p2
+               ldm r0, data.cur_plyr
+               call st_plyr_cur
+               ldm r0, data.swap_plyr
+               ; Only proceed further if swap requested
                cmpi r0, 1
                jnz .handle_plZ
                ldi r0, 0
@@ -167,10 +182,8 @@ handle_plyr:   ldm r0, data.swap_plyr
                cmpi r1, 1
                jnz .handle_plyA
                stm r0, data.cpu_lmsx
-               ; Save current player [ang, x, y] to p1 or p2
-.handle_plyA:  ldm r0, data.cur_plyr
-               call st_plyr_cur
                ; Swap the current player index
+.handle_plyA:  ldm r0, data.cur_plyr
                xori r0, 1
                stm r0, data.cur_plyr
                ; Load new current player [ang, x, y] from p1 or p2
@@ -899,26 +912,10 @@ drw_title:     ; Draw Title text
 ;
 ; Display the user interface sprites.
 ;--------------------------------------
-drw_hud:       nop
-               ; Draw "Player:"
-               ldi r0, data.str_plyr
-               ldi r1, 16
-               ldi r2, 16
-               call drw_str
-               ; Draw player number 
-               ldm r0, data.cur_plyr
-               addi r0, 1              ; make it 1 or 2, instead of 0 or 1
-               ldi r1, data.str_bcd3
-               call tobcd3
-               ldi r0, data.str_bcd3
-               ldi r1, 64
-               ldi r2, 16
-               call drw_str
-
-               ; Draw "Wind:"
+drw_hud:       ; Draw "Wind:"
                ldi r0, data.str_wind
-               ldi r1, 16
-               ldi r2, 32
+               ldi r1, 128
+               ldi r2, 16
                call drw_str
                ; Draw wind value below
                ldi r3, data.str_e
@@ -932,52 +929,88 @@ drw_hud:       nop
                ldi r1, data.str_bcd3
                call tobcd3
                ldi r0, data.str_bcd3
-               ldi r1, 64
-               ldi r2, 32
+               ldi r1, 128
+               ldi r2, 28
                call drw_str
                pop r0
-               ldi r1, 88
-               ldi r2, 32
+               ldi r1, 154
+               ldi r2, 28
                call drw_str
                ldi r0, data.str_wind2
-               ldi r1, 104
-               ldi r2, 32
+               ldi r1, 170
+               ldi r2, 28
                call drw_str
 
                ; Draw "Angle:"
                ldi r0, data.str_angle
-               ldi r1, 200
+               ldi r1, 16
                ldi r2, 16
                call drw_str
                ; Draw angle value below
-               ldm r0, data.cur_ang
+               ldm r0, data.p1_ang
                ldi r1, data.str_bcd3
                call tobcd3
                ldi r0, data.str_bcd3
-               ldi r1, 256
-               ldi r2, 16
+               ldi r1, 16
+               ldi r2, 28
                call drw_str
                ldi r0, data.str_angle2
-               ldi r1, 288
-               ldi r2, 16
+               ldi r1, 48
+               ldi r2, 28
                call drw_str
                
                ; Draw "Power:"
                ldi r0, data.str_power
-               ldi r1, 200
-               ldi r2, 32
+               ldi r1, 16
+               ldi r2, 48
                call drw_str
                ; Draw power value below
-               ldm r0, data.cur_pow
+               ldm r0, data.p1_pow
+               ldi r1, data.str_bcd3
+               call tobcd3
+               ldi r0, data.str_bcd3
+               ldi r1, 16
+               ldi r2, 60
+               call drw_str
+               ldi r0, data.str_power2
+               ldi r1, 48
+               ldi r2, 60
+               call drw_str
+
+               ; Draw "Angle:"
+               ldi r0, data.str_angle
+               ldi r1, 256
+               ldi r2, 16
+               call drw_str
+               ; Draw angle value below
+               ldm r0, data.p2_ang
                ldi r1, data.str_bcd3
                call tobcd3
                ldi r0, data.str_bcd3
                ldi r1, 256
-               ldi r2, 32
+               ldi r2, 28
+               call drw_str
+               ldi r0, data.str_angle2
+               ldi r1, 288
+               ldi r2, 28
+               call drw_str
+               
+               ; Draw "Power:"
+               ldi r0, data.str_power
+               ldi r1, 256
+               ldi r2, 48
+               call drw_str
+               ; Draw power value below
+               ldm r0, data.p2_pow
+               ldi r1, data.str_bcd3
+               call tobcd3
+               ldi r0, data.str_bcd3
+               ldi r1, 256
+               ldi r2, 60
                call drw_str
                ldi r0, data.str_power2
                ldi r1, 288
-               ldi r2, 32
+               ldi r2, 60
                call drw_str
 
                ret
@@ -1082,8 +1115,6 @@ data.cpu_lmsp: dw 0  ; Last power fired by CPU
 data.drw_debris: dw 0
 data.debris:   dw 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0 ; FP8.8
 
-data.str_plyr: db "Player:"
-               db 0
 data.str_angle: db "Angle:"
                 db 0
 data.str_angle2: db "deg"
