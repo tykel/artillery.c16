@@ -9,6 +9,9 @@
 importbin font.bin 0 3072 data.font
 CHAR_OFFS         equ 32
 
+SCORE_TO_WIN      equ 5
+SCORE_TO_WIN_STR  equ "/5"
+
 P1_TRAILS         equ 0x3000
 P2_TRAILS         equ 0x3200
 
@@ -35,6 +38,8 @@ reset:         ldi r0, 0
                stm r0, data.p2_y
                stm r0, data.p1_trls
                stm r0, data.p2_trls
+               stm r0, data.p1_score
+               stm r0, data.p2_score
                ldi r0, DEFAULT_POW
                stm r0, data.cpu_lmsp
                stm r0, data.p1_pow
@@ -242,16 +247,11 @@ st_plyr_cur:   mov r1, r0
 ; Play for the computer ("CPU") player.
 ; Strategy is as follows:
 ; - Delay for 1 second as turn begins.
-; - Fire missile.
-;
-; TODO:
 ; - Record last: missile hit X, power.
 ; - Check whether missile overshot (msl.x < p1.x), or undershot (msl.x > p1.x).
 ; - If missile overshot, decrease power.
 ; - If missile undershot, increase power.
 ; - Then fire missile.
-;
-; Could also think of a more complex scheme involving angles.
 ;--------------------------------------
 handle_cpu:    ldm r0, data.cpu_plyr
                cmpi r0, 1
@@ -298,10 +298,13 @@ handle_cpu:    ldm r0, data.cpu_plyr
 ; Perform screen flashes over 2.5 seconds if we are in a "win" state, then
 ; reset.
 ;--------------------------------------
-handle_win:    ldm r0, data.win
+handle_win:    ldm r0, data.p1_score
+               cmpi r0, 1
+               jz .handle_wiA
+               ldm r0, data.p2_score
                cmpi r0, 1
                jnz .handle_wiZ
-               bgc 9
+.handle_wiA:   bgc 9
                ldi r0, 30
                call wait
                bgc 1
@@ -310,7 +313,7 @@ handle_win:    ldm r0, data.win
                bgc 9
                ldi r0, 90
                call wait
-               ldi sp, 0xfdf0
+               ldi sp, 0xfdf0       ; Reset stack pointer as we restart
                jmp reset
 .handle_wiZ:   ret
 
@@ -484,8 +487,12 @@ handle_msl:    ldm r0, data.msl_stat
                jl .handle_msXT
                cmpi r0, 4
                jge .handle_msXT
-               ldi r9, 1
-               stm r9, data.win
+               ldm ra, data.cur_plyr   ; increase current player's...
+               shl ra, 1               ; ... score count
+               addi ra, data.p1_score
+               ldm r9, ra
+               addi r9, 1
+               stm r9, ra
 .handle_msXT:  subi r8, 3
                stm r8, r6           ; blow top 3px off column
                addi r6, 2
@@ -977,6 +984,12 @@ drw_hud:       ; Draw "Wind:"
                ldi r2, 60
                call drw_str
 
+               ; Draw "Score:"
+               ldi r0, data.p1_score
+               ldi r1, 16
+               ldi r2, 72
+               call drw_str
+
                ; Draw "Angle:"
                ldi r0, data.str_angle
                ldi r1, 256
@@ -1011,6 +1024,12 @@ drw_hud:       ; Draw "Wind:"
                ldi r0, data.str_power2
                ldi r1, 288
                ldi r2, 60
+               call drw_str
+
+               ; Draw "Score:"
+               ldi r0, data.p2_score
+               ldi r1, 256
+               ldi r2, 72
                call drw_str
 
                ret
@@ -1104,6 +1123,9 @@ data.msl_dx:   dw 0  ; FP8.8
 data.msl_dy:   dw 0  ; FP8.8
 data.wind_dx:  dw 0  ; FP8.8
 
+data.p1_score:  dw 0
+data.p2_score:  dw 0
+
 data.n_vblnk:  dw 2
 data.f_nb:     dw 0
 
@@ -1114,6 +1136,11 @@ data.cpu_lmsp: dw 0  ; Last power fired by CPU
 
 data.drw_debris: dw 0
 data.debris:   dw 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0 ; FP8.8
+
+data.str_score: db "Score:"
+                db 0
+data.str_score2: db SCORE_TO_WIN_STR
+                 db 0
 
 data.str_angle: db "Angle:"
                 db 0
