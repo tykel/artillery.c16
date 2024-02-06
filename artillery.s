@@ -14,6 +14,9 @@ SCORE_TO_WIN      equ 5
 P1_TRAILS         equ 0x3000
 P2_TRAILS         equ 0x3200
 
+WIND_PARTS        equ 0x3400
+WIND_NUM_PARTS    equ 64
+
 P1_X              equ 32
 P2_X              equ 288
 
@@ -86,6 +89,7 @@ game:          call gen_columns
                ldi r0, 0
                call ld_plyr_cur
                call init_wind
+               call init_wp
 loop:          cls
                bgc 1
                call handle_plyr
@@ -93,6 +97,7 @@ loop:          cls
                call handle_inp
                call handle_msl
                call handle_debris
+               call handle_wp
                
                call drw_hud
                call drw_columns
@@ -101,6 +106,8 @@ loop:          cls
                call drw_msl
                call drw_debris
                call drw_trails
+               call drw_wp
+
                call handle_win
                ldm r0, data.n_vblnk
                call wait
@@ -125,9 +132,106 @@ wait:          vblnk
 ; Choose a random wind speed.
 ; Negative implies "West", positive "East".
 ;--------------------------------------
-init_wind:     rnd r0, 128          ; [ 0    ..  0.50] in FP8.8
-               subi r0, 64          ; [-0.25 ..  0.25] in FP8.8
+init_wind:     rnd r0, 128          ; [ 0 .. 8] in FP12.4
+               subi r0, 64          ; [-4 .. 4] in FP12.4
                stm r0, data.wind_dx
+               ret
+               
+;--------------------------------------
+; make_wp --
+;
+; Generate a random wind particle (x,y,dx,dy) at offset given in r0.
+;--------------------------------------
+make_wp:       rnd r1, 5120         ; 320 in FP12.4
+               stm r1, r0           ; i.e. random 0 <= x < 320
+               addi r0, 2
+               rnd r1, 1024         ; 64 in FP12.4
+               stm r1, r0           ; i.e. random y < 64
+               addi r0, 2
+               rnd r1, 16           ; 1 in FP12.4
+               subi r1, 8
+               stm r1, r0           ; i.e random -.5 <= dx < .5
+               addi r0, 2
+               ldi r1, 10
+               stm r1, r0           ; dy = a small number
+               ret
+
+;--------------------------------------
+; init_wp --
+;
+; Generate an array of random wind particles.
+;--------------------------------------
+init_wp:       ldi r2, 0
+               ldi r0, WIND_PARTS
+.init_wpL:     call make_wp
+               addi r2, 1
+               cmpi r2, WIND_NUM_PARTS
+               jl .init_wpL
+.init_wpZ:     ret
+
+;--------------------------------------
+; handle_wp --
+;
+; Update the wind particles in the array.
+;--------------------------------------
+handle_wp:     ldi r2, 0
+               ldi r0, WIND_PARTS
+               ; Load particle state
+.handle_wpL:   ldm r3, r0              ; x
+               addi r0, 2
+               ldm r4, r0              ; y
+               addi r0, 2
+               ldm r5, r0              ; dx
+               addi r0, 2
+               ldm r6, r0              ; dy
+               addi r0, 2
+               ldm r7, data.wind_dx    ; wind.dx
+               ; Calculate new position
+               add r3, r5
+               add r3, r7
+               rnd r7, 2               ; Use a small random portion
+               subi r7, 1
+               add r3, r7
+               add r4, r6
+               ; Save new particle state
+               subi r0, 8
+               cmpi r3, 5120           ; 320 in FP12.4
+               jge .handle_wpN
+               cmpi r3, 0
+               jg .handle_wpS
+.handle_wpN:   call make_wp
+               jmp .handle_wpT
+.handle_wpS:   stm r3, r0
+               addi r0, 2
+               stm r4, r0
+               addi r0, 2
+               stm r5, r0
+               addi r0, 2
+               stm r6, r0
+.handle_wpT:   addi r0, 2
+               addi r2, 1
+               cmpi r2, WIND_NUM_PARTS
+               jl .handle_wpL
+.handle_wpZ:   ret
+
+;--------------------------------------
+; drw_wp --
+;
+; Draw the wind particles.
+;--------------------------------------
+drw_wp:        spr 0x0101
+               ldi r0, 0
+               ldi r1, WIND_PARTS
+.drw_wpL:      ldm r2, r1
+               sar r2, 4
+               addi r1, 2
+               ldm r3, r1
+               sar r3, 4
+               addi r1, 6
+               drw r2, r3, data.spr_wp
+               addi r0, 1
+               cmpi r0, WIND_NUM_PARTS
+               jl .drw_wpL
                ret
 
 ;--------------------------------------
@@ -789,11 +893,11 @@ drw_columns:   ldi r1, 318
 drw_cannons:   spr 0x0401              ; cannons are 2x4 pixels
                ldm r0, data.p1_x
                ldm r1, data.p1_y
-.zzzD:         subi r1, 4
+               subi r1, 4
                drw r0, r1, data.spr_cnn ; draw at (x, 240 - col[x] - 4)
                ldm r0, data.p2_x
                ldm r1, data.p2_y
-.zzzE:         subi r1, 4
+               subi r1, 4
                drw r0, r1, data.spr_cnn ; draw at (x, 240 - col[x] - 4)
                ret
 
@@ -1164,8 +1268,8 @@ data.p2_trls:  dw 0
 data.msl_stat: dw 0
 data.msl_x:    dw 0  ; FP12.4
 data.msl_y:    dw 0  ; FP12.4
-data.msl_dx:   dw 0  ; FP8.8
-data.msl_dy:   dw 0  ; FP8.8
+data.msl_dx:   dw 0  ; FP12.4
+data.msl_dy:   dw 0  ; FP12.4
 data.wind_dx:  dw 0  ; FP8.8
 
 data.p1_score:  dw 0
@@ -1303,6 +1407,7 @@ data.spr:      dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 16
                dw 0x5555, 0x5555, 0x5555, 0x5555,  ; 128
 
 data.spr_msl:  db 0x80
+data.spr_wp:   db 0x50
 
 data.spr_cnn:  db 0xff, 0xff, 0xff, 0xff
 
