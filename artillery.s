@@ -10,7 +10,6 @@ importbin font.bin 0 3072 data.font
 CHAR_OFFS         equ 32
 
 SCORE_TO_WIN      equ 5
-SCORE_TO_WIN_STR  equ "/5"
 
 P1_TRAILS         equ 0x3000
 P2_TRAILS         equ 0x3200
@@ -22,12 +21,26 @@ DEFAULT_POW       equ 25
 DEFAULT_P1_ANG    equ 135
 DEFAULT_P2_ANG    equ 45
 
+start:         call hard_reset
+               jmp init
+
 ;--------------------------------------
-; reset --
+; hard_reset --
 ;
-; Common code to reset state. Not a subroutine.
+; Reinitialize variables that need must be reset upon transition to/from menu.
 ;--------------------------------------
-reset:         ldi r0, 0
+hard_reset:    call soft_reset
+               ldi r0, 0
+               stm r0, data.p1_score
+               stm r0, data.p2_score
+               ret
+
+;--------------------------------------
+; soft_reset --
+;
+; Reinitialize variables that need reseting between rounds. 
+;--------------------------------------
+soft_reset:    ldi r0, 0
                stm r0, data.start
                stm r0, data.win
                stm r0, data.cur_plyr
@@ -38,8 +51,6 @@ reset:         ldi r0, 0
                stm r0, data.p2_y
                stm r0, data.p1_trls
                stm r0, data.p2_trls
-               stm r0, data.p1_score
-               stm r0, data.p2_score
                ldi r0, DEFAULT_POW
                stm r0, data.cpu_lmsp
                stm r0, data.p1_pow
@@ -50,6 +61,7 @@ reset:         ldi r0, 0
                stm r0, data.p1_ang
                ldi r0, DEFAULT_P2_ANG
                stm r0, data.p2_ang
+               ret
 
 ;---------------------------------------
 ; init / loop --
@@ -113,8 +125,8 @@ wait:          vblnk
 ; Choose a random wind speed.
 ; Negative implies "West", positive "East".
 ;--------------------------------------
-init_wind:     rnd r0, 256          ; [ 0..1] in FP8.8
-               subi r0, 128         ; [-0.5 .. 0.5] in FP8.8
+init_wind:     rnd r0, 128          ; [ 0    ..  0.50] in FP8.8
+               subi r0, 64          ; [-0.25 ..  0.25] in FP8.8
                stm r0, data.wind_dx
                ret
 
@@ -298,13 +310,12 @@ handle_cpu:    ldm r0, data.cpu_plyr
 ; Perform screen flashes over 2.5 seconds if we are in a "win" state, then
 ; reset.
 ;--------------------------------------
-handle_win:    ldm r0, data.p1_score
-               cmpi r0, 1
-               jz .handle_wiA
-               ldm r0, data.p2_score
+handle_win:    ldm r0, data.win
                cmpi r0, 1
                jnz .handle_wiZ
-.handle_wiA:   bgc 9
+               ldi r0, 0
+               stm r0, data.win
+               bgc 9
                ldi r0, 30
                call wait
                bgc 1
@@ -314,8 +325,16 @@ handle_win:    ldm r0, data.p1_score
                ldi r0, 90
                call wait
                ldi sp, 0xfdf0       ; Reset stack pointer as we restart
-               jmp reset
+               ldm r0, data.p1_score
+               cmpi r0, SCORE_TO_WIN
+               jz start             ; Equivalent to soft-reset
+               ldm r0, data.p2_score
+               cmpi r0, SCORE_TO_WIN
+               jz start             ; Ditto
+               call soft_reset
+               jmp game             ; Start a new round
 .handle_wiZ:   ret
+               
 
 ;--------------------------------------
 ; handle_inp --
@@ -379,7 +398,7 @@ handle_inp:    ldm r0, 0xfff0
 .handle_inE:   tsti r0, 16          ; Select button
                jz .handle_inZ
                pop r0
-               jmp reset            ; Select -> reset the game
+               jmp start            ; Select -> reset the game
 .handle_inZ:   ret
 
 ;--------------------------------------
@@ -493,6 +512,8 @@ handle_msl:    ldm r0, data.msl_stat
                ldm r9, ra
                addi r9, 1
                stm r9, ra
+               ldi ra, 1
+               stm ra, data.win
 .handle_msXT:  subi r8, 3
                stm r8, r6           ; blow top 3px off column
                addi r6, 2
@@ -985,9 +1006,21 @@ drw_hud:       ; Draw "Wind:"
                call drw_str
 
                ; Draw "Score:"
-               ldi r0, data.p1_score
+               ldi r0, data.str_score
                ldi r1, 16
-               ldi r2, 72
+               ldi r2, 80
+               call drw_str
+               ; Draw P1 score value below
+               ldm r0, data.p1_score
+               ldi r1, data.str_bcd3
+               call tobcd3
+               ldi r0, data.str_bcd3
+               ldi r1, 16
+               ldi r2, 92
+               call drw_str
+               ldi r0, data.str_score2
+               ldi r1, 48
+               ldi r2, 92
                call drw_str
 
                ; Draw "Angle:"
@@ -1027,9 +1060,21 @@ drw_hud:       ; Draw "Wind:"
                call drw_str
 
                ; Draw "Score:"
-               ldi r0, data.p2_score
+               ldi r0, data.str_score
                ldi r1, 256
-               ldi r2, 72
+               ldi r2, 80
+               call drw_str
+               ; Draw P2 score value below
+               ldm r0, data.p2_score
+               ldi r1, data.str_bcd3
+               call tobcd3
+               ldi r0, data.str_bcd3
+               ldi r1, 256
+               ldi r2, 92
+               call drw_str
+               ldi r0, data.str_score2
+               ldi r1, 288
+               ldi r2, 92
                call drw_str
 
                ret
@@ -1139,7 +1184,7 @@ data.debris:   dw 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0 ; FP8.8
 
 data.str_score: db "Score:"
                 db 0
-data.str_score2: db SCORE_TO_WIN_STR
+data.str_score2: db "/ 5"
                  db 0
 
 data.str_angle: db "Angle:"
@@ -1152,7 +1197,7 @@ data.str_power2: db "%"
                  db 0
 data.str_wind: db "Wind:"
                db 0
-data.str_wind2: db " / 128"
+data.str_wind2: db " / 64"
                 db 0
 data.str_w:    db " W"
                db 0
