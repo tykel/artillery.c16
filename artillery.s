@@ -142,18 +142,45 @@ init_wind:     rnd r0, 128          ; [ 0 .. 8] in FP12.4
 ;
 ; Generate a random wind particle (x,y,dx,dy) at offset given in r0.
 ;--------------------------------------
-make_wp:       rnd r1, 5120         ; 320 in FP12.4
+make_wp:       ; 3 cases:
+               ; - 0: top edge (x = random(0,320), y = 0)
+               ; - 1: left edge (x = 0, y = random(0, 192))
+               ; - 2: right edge (x = 319, y = random(0, 192))
+               push r2
+               rnd r2, 2
+.make_wp0:     cmpi r2, 0
+               jnz .make_wp1
+               rnd r1, 5120         ; 320 in FP12.4
                stm r1, r0           ; i.e. random 0 <= x < 320
                addi r0, 2
-               rnd r1, 1024         ; 64 in FP12.4
-               stm r1, r0           ; i.e. random y < 64
+               ldi r1, 0
+               stm r1, r0           ; i.e. y = 0
+               jmp .make_wpD
+
+.make_wp1:     cmpi r2, 1
+               jnz .make_wp2
+               ldi r1, 0
+               stm r1, r0           ; i.e. x = 0
                addi r0, 2
+               rnd r1, 3072         ; 192 in FP12.4
+               stm r1, r0           ; i.e. random 0 <= y < 192
+               jmp .make_wpD
+
+.make_wp2:     ldi r1, 5104         ; 319 in FP12.4
+               stm r1, r0           ; i.e. x = 319
+               addi r0, 2
+               rnd r1, 3072         ; 192 in FP12.4
+               stm r1, r0           ; i.e. random y < 64
+
+.make_wpD:     addi r0, 2
                rnd r1, 16           ; 1 in FP12.4
                subi r1, 8
                stm r1, r0           ; i.e random -.5 <= dx < .5
                addi r0, 2
                ldi r1, 10
                stm r1, r0           ; dy = a small number
+
+               pop r2
                ret
 
 ;--------------------------------------
