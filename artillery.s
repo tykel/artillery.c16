@@ -9,7 +9,7 @@
 importbin font.bin 0 3072 data.font
 CHAR_OFFS         equ 32
 
-SCORE_TO_WIN      equ 5
+SCORE_TO_WIN      equ 1
 
 P1_TRAILS         equ 0x3000
 P2_TRAILS         equ 0x3200
@@ -59,7 +59,10 @@ soft_reset:    ldi r0, 0
                stm r0, data.p1_pow
                stm r0, data.p2_pow
                ldi r0, P1_X
+               stm r0, data.p1_x
                stm r0, data.cpu_lmsx
+               ldi r0, P2_X
+               stm r0, data.p2_x
                ldi r0, DEFAULT_P1_ANG
                stm r0, data.p1_ang
                ldi r0, DEFAULT_P2_ANG
@@ -458,12 +461,34 @@ handle_win:    ldm r0, data.win
                ldi sp, 0xfdf0       ; Reset stack pointer as we restart
                ldm r0, data.p1_score
                cmpi r0, SCORE_TO_WIN
-               jz start             ; Equivalent to soft-reset
+               jz .handle_wiR       ; Equivalent to soft-reset
                ldm r0, data.p2_score
                cmpi r0, SCORE_TO_WIN
-               jz start             ; Ditto
+               jz .handle_wiR       ; Ditto
+               pop r0
                call soft_reset
                jmp game             ; Start a new round
+.handle_wiR:   cls
+               ldi r0, data.str_win
+               ldi r1, 96
+               ldi r2, 120
+               call drw_str
+               ldm r0, data.cur_plyr
+               addi r0, 1
+               ldi r1, data.str_bcd3
+               call tobcd3
+               ldi r0, data.str_bcd3
+               ldi r1, 152
+               ldi r2, 120
+               call drw_str
+               ldi r0, data.str_win2
+               ldi r1, 184
+               ldi r2, 120
+               call drw_str
+               ldi r0, 120
+               call wait
+bp:            pop r0
+               jmp start
 .handle_wiZ:   ret
                
 
@@ -527,9 +552,17 @@ handle_inp:    ldm r0, 0xfff0
                stm r1, data.need_rls
                jmp .handle_inZ
 .handle_inE:   tsti r0, 16          ; Select button
-               jz .handle_inZ
+               jz .handle_inF
                pop r0
                jmp start            ; Select -> reset the game
+.handle_inF:   tsti r0, 32          ; Start button
+               jz .handle_inZ
+               ldi r1, 1
+               stm r1, data.win     ; Start -> win the game
+               stm r1, data.need_rls   ; Require button release
+               ldi r1, SCORE_TO_WIN
+               stm r1, data.p1_score
+               stm r1, data.p2_score
 .handle_inZ:   ret
 
 ;--------------------------------------
@@ -712,6 +745,11 @@ init_debris:   ldi r1, 0
                ldi r3, data.debris
 .init_debriL:  cmpi r1, 7
                jz .init_debriZ
+               ldm r0, data.msl_dx
+               sar r0, 4
+               divi r0, 75
+               stm r0, r3
+               addi r3, 2           ; debris[i].dx = msl.dx / 75
                rnd r2, 5
                subi r2, 3
                ldm r0, data.msl_x
@@ -745,6 +783,11 @@ handle_debris: ldm r0, data.drw_debris
                ldi r1, data.debris
 .handle_debrL: cmpi r0, 7
                jz .handle_debrZ
+               ldm r2, r1
+               addi r1, 2
+               ldm r3, r1
+               add r3, r2
+               stm r3, r1
                addi r1, 2
                ldm r2, r1
                addi r1, 2
@@ -775,6 +818,7 @@ drw_debris:    ldm r0, data.drw_debris
                ldi r1, data.debris
 .drw_debrL:    cmpi r0, 7
                jz .drw_debrZ
+               addi r1, 2
                ldm r2, r1
                addi r1, 4
                ldm r3, r1
@@ -1311,7 +1355,7 @@ data.cpu_lmsx: dw 0  ; Last impact msl.x fired by CPU
 data.cpu_lmsp: dw 0  ; Last power fired by CPU
 
 data.drw_debris: dw 0
-data.debris:   dw 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0 ; FP8.8
+data.debris:   dw 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 ; FP8.8
 
 data.str_score: db "Score:"
                 db 0
@@ -1356,6 +1400,10 @@ data.str_togSel: db "[Press SELECT to toggle]"
                  db 0
 data.str_start: db "Press START to begin game"
                 db 0
+data.str_win: db "Player "
+              db 0
+data.str_win2: db "wins!"
+               db 0
 data.str_bcd3: db 0,0,0,0
 
 data.palette:  db 0,0,0
