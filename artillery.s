@@ -9,7 +9,7 @@
 importbin font.bin 0 3072 data.font
 CHAR_OFFS         equ 32
 
-SCORE_TO_WIN      equ 1
+SCORE_TO_WIN      equ 5
 
 P1_TRAILS         equ 0x3000
 P2_TRAILS         equ 0x3200
@@ -458,7 +458,7 @@ handle_win:    ldm r0, data.win
                bgc 9
                ldi r0, 90
                call wait
-               ldi sp, 0xfdf0       ; Reset stack pointer as we restart
+.sp_reset:     ldi sp, 0xfdf0       ; Reset stack pointer as we restart
                ldm r0, data.p1_score
                cmpi r0, SCORE_TO_WIN
                jz .handle_wiR       ; Equivalent to soft-reset
@@ -558,11 +558,7 @@ handle_inp:    ldm r0, 0xfff0
 .handle_inF:   tsti r0, 32          ; Start button
                jz .handle_inZ
                ldi r1, 1
-               stm r1, data.win     ; Start -> win the game
                stm r1, data.need_rls   ; Require button release
-               ldi r1, SCORE_TO_WIN
-               stm r1, data.p1_score
-               stm r1, data.p2_score
 .handle_inZ:   ret
 
 ;--------------------------------------
